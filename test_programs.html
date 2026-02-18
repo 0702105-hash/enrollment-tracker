@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Programs</title>
+</head>
+<body>
+    <h1>Testing Programs API</h1>
+    <div id="result"></div>
+
+    <script>
+    async function testPrograms() {
+        try {
+            const res = await fetch('api/programs.php');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+            const programs = await res.json();
+            document.getElementById('result').innerHTML = '<pre>' + JSON.stringify(programs, null, 2) + '</pre>';
+        } catch(e) {
+            document.getElementById('result').innerHTML = 'Error: ' + e.message;
+        }
+    }
+
+    testPrograms();
+    </script>
+</body>
+</html>

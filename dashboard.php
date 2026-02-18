@@ -68,6 +68,12 @@ body{
     display:flex;
     gap:12px;
     flex-wrap:wrap;
+    align-items: center;
+}
+
+#customYearRange{
+    display: flex;
+    gap: 8px;
 }
 
 select,button{
@@ -184,6 +190,28 @@ button:hover{opacity:.9}
             <select id="programSelect">
                 <option value="">Loading programs...</option>
             </select>
+            <select id="yearFilter">
+                <option value="all">All Years</option>
+                <option value="1year">Last 1 Year</option>
+                <option value="3years">Last 3 Years</option>
+                <option value="5years">Last 5 Years</option>
+                <option value="custom">Custom Range</option>
+            </select>
+            <div id="customYearRange" style="display: none;">
+                <select id="startYear">
+                    <option value="">Start Year</option>
+                </select>
+                <select id="endYear">
+                    <option value="">End Year</option>
+                </select>
+            </div>
+            <select id="semesterFilter">
+                <option value="all">All Semesters</option>
+                <option value="1">Semester 1</option>
+                <option value="2">Semester 2</option>
+                <option value="3">Summer Class</option>
+                <option value="1and2">Semesters 1 & 2</option>
+            </select>
             <button id="refreshBtn">Refresh</button>
         </div>
 
@@ -214,9 +242,11 @@ constructor(){
 
 init(){
 <?php if (isset($_GET['login'])): ?>
-    document.getElementById('dashboard').style.display='block';
-    this.loadPrograms();
-    this.bindEvents();
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('dashboard').style.display='block';
+        this.loadPrograms();
+        this.bindEvents();
+    });
 <?php endif; ?>
 }
 
@@ -239,15 +269,64 @@ try{
     select.innerHTML='<option value="">All Programs</option>'+
         programs.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
 
+    // Load years for custom range
+    await this.loadYears();
+
     this.showStatus('Programs loaded');
 }catch(e){
     this.showStatus('Failed to load programs: '+e.message,'error');
 }
 }
 
+async loadYears(){
+try{
+    const res=await fetch('api/enrollments.php');
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data=await res.json();
+    // Filter out prediction-like data (same start year with different end years)
+    const validData = data.filter(e => {
+        const [startYear, endYear] = e.academic_year.split('-').map(y => parseInt(y));
+        return (endYear - startYear) === 1;
+    });
+    
+    const years = [...new Set(validData.map(e => parseInt(e.academic_year.split('-')[1])))].sort((a,b)=>b-a);
+
+    const startYearSelect = document.getElementById('startYear');
+    const endYearSelect = document.getElementById('endYear');
+
+    startYearSelect.innerHTML = '<option value="">Start Year</option>' +
+        years.map(y => `<option value="${y}">${y}</option>`).join('');
+    endYearSelect.innerHTML = '<option value="">End Year</option>' +
+        years.map(y => `<option value="${y}">${y}</option>`).join('');
+}catch(e){
+    console.error('Failed to load years:', e);
+}
+}
+
 bindEvents(){
 document.getElementById('programSelect')
 .addEventListener('change',e=>this.loadData(e.target.value));
+
+document.getElementById('yearFilter')
+.addEventListener('change',e=>{
+    const customRange = document.getElementById('customYearRange');
+    if(e.target.value === 'custom'){
+        customRange.style.display = 'flex';
+    }else{
+        customRange.style.display = 'none';
+        this.loadData(document.getElementById('programSelect').value);
+    }
+});
+
+document.getElementById('startYear')
+.addEventListener('change',()=>this.loadData(document.getElementById('programSelect').value));
+
+document.getElementById('endYear')
+.addEventListener('change',()=>this.loadData(document.getElementById('programSelect').value));
+
+document.getElementById('semesterFilter')
+.addEventListener('change',()=>this.loadData(document.getElementById('programSelect').value));
 
 document.getElementById('refreshBtn')
 .addEventListener('click',()=>this.loadData(
@@ -270,21 +349,111 @@ try{
     }
 
     let predTotal=null;
-    try{
-        const predRes=await fetch(`api/predictions.php?program_id=${programId}`);
-        if(predRes.ok){
-            const predData=await predRes.json();
-            predTotal=predData[0]?.predicted_total||null;
-        }
-    }catch{}
+    if(programId){
+        try{
+            const predRes=await fetch(`api/predictions.php?program_id=${programId}`);
+            if(predRes.ok){
+                const predData=await predRes.json();
+                predTotal=predData[0]?.predicted_total||null;
+            }
+        }catch{}
+    }
 
-    this.renderSummary(data);
-    this.renderChart(data,predTotal,programId);
+    const filteredData = this.filterData(data);
+
+    this.renderSummary(filteredData);
+    this.renderChart(filteredData,predTotal,programId);
     this.showStatus('Dashboard updated');
 
 }catch(e){
     this.showStatus('Load failed: '+e.message,'error');
 }
+}
+
+filterData(data){
+    let filtered = [...data];
+    const yearFilter = document.getElementById('yearFilter').value;
+    const semesterFilter = document.getElementById('semesterFilter').value;
+
+    // First, filter out prediction-like data (same start year with different end years)
+    filtered = filtered.filter(e => {
+        const [startYear, endYear] = e.academic_year.split('-').map(y => parseInt(y));
+        // Exclude data where start year and end year are not consecutive (likely predictions)
+        return (endYear - startYear) === 1;
+    });
+
+    // Apply year filter
+    if(yearFilter !== 'all'){
+        const currentYear = new Date().getFullYear();
+        let startYear, endYear;
+
+        switch(yearFilter){
+            case '1year':
+                startYear = currentYear - 1;
+                endYear = currentYear;
+                break;
+            case '3years':
+                startYear = currentYear - 3;
+                endYear = currentYear;
+                break;
+            case '5years':
+                startYear = currentYear - 5;
+                endYear = currentYear;
+                break;
+            case 'custom':
+                startYear = parseInt(document.getElementById('startYear').value);
+                endYear = parseInt(document.getElementById('endYear').value);
+                if(!startYear || !endYear) return filtered; // Don't filter if custom years not selected
+                break;
+        }
+
+        filtered = filtered.filter(e => {
+            const academicEndYear = parseInt(e.academic_year.split('-')[1]);
+            return academicEndYear >= startYear && academicEndYear <= endYear;
+        });
+    }
+
+    // Apply semester filter
+    if(semesterFilter !== 'all'){
+        filtered = filtered.filter(e => {
+            switch(semesterFilter){
+                case '1':
+                    return e.semester == 1;
+                case '2':
+                    return e.semester == 2;
+                case '3':
+                    return e.semester == 3;
+                case '1and2':
+                    return e.semester == 1 || e.semester == 2;
+                default:
+                    return true;
+            }
+        });
+    }
+
+    // Aggregate data by academic year and semester when all programs are selected
+    const programFilter = document.getElementById('programSelect').value;
+    if(programFilter === ''){
+        const aggregated = {};
+        filtered.forEach(e => {
+            const key = `${e.academic_year}_${e.semester}`;
+            if(!aggregated[key]){
+                aggregated[key] = {
+                    academic_year: e.academic_year,
+                    semester: e.semester,
+                    male: 0,
+                    female: 0,
+                    total: 0
+                };
+            }
+            aggregated[key].male += e.male || 0;
+            aggregated[key].female += e.female || 0;
+            aggregated[key].total += e.total || (e.male || 0) + (e.female || 0);
+        });
+        filtered = Object.values(aggregated);
+    }
+
+    return filtered;
 }
 
 renderSummary(data){
@@ -293,6 +462,9 @@ const latest=data[data.length-1];
 
 const total=data.reduce((sum,e)=>
 sum+(e.total||e.male+e.female||0),0);
+
+// Count semesters (unique academic_year + semester combinations)
+const semesterCount = new Set(data.map(e => `${e.academic_year}_${e.semester}`)).size;
 
 grid.innerHTML=`
 <div class="summary-card">
@@ -306,7 +478,7 @@ grid.innerHTML=`
 </div>
 
 <div class="summary-card">
-<h3>${data.length}</h3>
+<h3>${semesterCount}</h3>
 <p>Semesters Recorded</p>
 </div>
 `;
@@ -338,16 +510,16 @@ datasets:[
 {
 label:'Total',
 data:finalTotals,
-borderColor:'#2b6cb0',
-backgroundColor:'rgba(43,108,176,.1)',
+borderColor:'#ed8936',
+backgroundColor:'rgba(212, 170, 34, 0.1)',
+borderDash:[5,5],
 fill:true,
 tension:.4
 },
 {
 label:'Male',
 data:predTotal?[...males,null]:males,
-borderColor:'#ed8936',
-borderDash:[5,5]
+borderColor:'#2b6cb0'
 },
 {
 label:'Female',
@@ -372,7 +544,7 @@ window.location.href='?login=1';
 }else alert('Wrong password!');
 });
 
-if(window.location.search.includes('login=1')){
+if(window.location.search.includes('login=1') || window.location.href.includes('login=1')){
 new EnrollmentTracker();
 }
 </script>
