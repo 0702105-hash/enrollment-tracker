@@ -1,0 +1,2 @@
+create better dashboard for predictions 
+put side nav bar (sticky)
