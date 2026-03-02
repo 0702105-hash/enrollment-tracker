@@ -117,7 +117,7 @@ body{
     margin-bottom:20px;
 }
 
-select,input,button{
+select,input,button,textarea{
     padding:12px 18px;
     border-radius:12px;
     border:1px solid #e2e8f0;
@@ -125,7 +125,7 @@ select,input,button{
     font-family:inherit;
 }
 
-select:focus,input:focus{
+select:focus,input:focus,textarea:focus{
     outline:none;
     border-color:#2b6cb0;
     box-shadow:0 0 0 3px rgba(43,108,176,0.1);
@@ -138,6 +138,7 @@ button{
     cursor:pointer;
     font-weight:600;
     transition:all 0.3s;
+    padding:12px 18px;
 }
 
 button:hover{
@@ -164,6 +165,14 @@ button.btn-danger:hover{
 button.btn-small{
     padding:8px 12px;
     font-size:13px;
+}
+
+button.btn-warning{
+    background:#f6ad55;
+}
+
+button.btn-warning:hover{
+    background:#ed8936;
 }
 
 /* ===== STATUS ===== */
@@ -310,12 +319,61 @@ tbody tr:hover{
     display:grid;
     grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
     gap:15px;
+    margin-bottom:15px;
 }
 
 .form-actions{
     display:flex;
     gap:10px;
     margin-top:25px;
+}
+
+/* ===== MODAL ===== */
+
+.modal{
+    display:none;
+    position:fixed;
+    z-index:1000;
+    left:0;
+    top:0;
+    width:100%;
+    height:100%;
+    overflow:auto;
+    background-color:rgba(0,0,0,0.4);
+}
+
+.modal-content{
+    background-color:#fefefe;
+    margin:10% auto;
+    padding:30px;
+    border:1px solid #888;
+    border-radius:18px;
+    width:90%;
+    max-width:500px;
+    box-shadow:0 8px 25px rgba(0,0,0,0.2);
+}
+
+.modal-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:20px;
+}
+
+.modal-header h2{
+    margin:0;
+}
+
+.close-modal{
+    font-size:28px;
+    font-weight:bold;
+    color:#aaa;
+    cursor:pointer;
+}
+
+.close-modal:hover,
+.close-modal:focus{
+    color:#000;
 }
 
 /* ===== PREDICTIONS GRID ===== */
@@ -436,6 +494,11 @@ tbody tr:hover{
     .predictions-grid{
         grid-template-columns:1fr;
     }
+
+    .modal-content{
+        width:95%;
+        margin:20% auto;
+    }
 }
 </style>
 </head>
@@ -461,7 +524,7 @@ tbody tr:hover{
 
     <!-- NOTICE -->
     <div class="notice">
-        <strong>📢 Notice:</strong> Dashboard v2 - All programs overview with predictions
+        <strong>📢 Notice:</strong> Dashboard v3 - Editable enrollments, smart year selection, visible numbers
     </div>
 
     <!-- HEADER -->
@@ -489,7 +552,7 @@ tbody tr:hover{
         <!-- ALL PROGRAMS CHARTS -->
         <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                <h2>📈 Enrollment Overview by Program</h2>
+                <h2>📈 Enrollment Trends by Program</h2>
                 <button onclick="tracker.loadAllProgramsCharts()" style="margin:0;">🔄 Refresh</button>
             </div>
             <div id="status" class="status"></div>
@@ -540,39 +603,42 @@ tbody tr:hover{
     <!-- ===== ADD ENROLLMENT TAB ===== -->
     <div id="add-enrollment" class="tab-content">
         <div class="card">
-            <h2>➕ Add New Enrollment</h2>
+            <h2>➕ Add New Enrollment Record</h2>
             
             <form id="addEnrollmentForm" onsubmit="tracker.handleAddEnrollment(event)">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Program <span style="color:red">*</span></label>
-                        <select id="formProgram" required>
-                            <option value="">Select a program</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Academic Year <span style="color:red">*</span></label>
-                        <input type="text" id="formYear" placeholder="e.g., 2024-2025" required>
-                    </div>
+                <div class="form-group">
+                    <label>Program <span style="color:red">*</span></label>
+                    <select id="formProgram" required style="width:100%;" onchange="tracker.updateAvailableYears()">
+                        <option value="">Select a program</option>
+                    </select>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
+                        <label>Academic Year <span style="color:red">*</span></label>
+                        <select id="formYear" required style="width:100%;">
+                            <option value="">Select academic year</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label>Semester <span style="color:red">*</span></label>
-                        <select id="formSemester" required>
+                        <select id="formSemester" required style="width:100%;">
                             <option value="">Select semester</option>
                             <option value="1">First</option>
                             <option value="2">Second</option>
                             <option value="3">Summer</option>
                         </select>
                     </div>
+                </div>
+
+                <div class="form-row">
                     <div class="form-group">
                         <label>Male Students <span style="color:red">*</span></label>
-                        <input type="number" id="formMale" min="0" required>
+                        <input type="number" id="formMale" min="0" required style="width:100%;">
                     </div>
                     <div class="form-group">
                         <label>Female Students <span style="color:red">*</span></label>
-                        <input type="number" id="formFemale" min="0" required>
+                        <input type="number" id="formFemale" min="0" required style="width:100%;">
                     </div>
                 </div>
 
@@ -594,24 +660,75 @@ tbody tr:hover{
     <!-- ===== PREDICTIONS TAB ===== -->
     <div id="predictions" class="tab-content">
         <div class="card">
-            <h2>🔮 Enrollment Predictions</h2>
+            <h2>🔮 Enrollment Predictions with Historical Data</h2>
 
             <div class="select-container">
-                <select id="predProgramFilter">
-                    <option value="">All Programs</option>
+                <label style="margin-right:10px;font-weight:600;">Select Program:</label>
+                <select id="predProgramFilter" style="flex:1;max-width:400px;">
+                    <option value="">Choose a program</option>
                 </select>
-                <select id="predYearFilter">
-                    <option value="">All Years</option>
-                </select>
-                <button onclick="tracker.refreshPredictions()">🔄 Refresh</button>
+                <button onclick="tracker.refreshPredictions()">🔄 Load Chart</button>
             </div>
 
-            <div class="predictions-grid" id="predictionsGrid">
-                <div class="text-center" style="padding:40px;grid-column:1/-1;">Loading predictions...</div>
+            <div id="predictionChartContainer" class="card" style="margin-top:20px;display:none;">
+                <h3 id="predictionChartTitle"></h3>
+                <div class="chart-container">
+                    <canvas id="predictionChart"></canvas>
+                </div>
+            </div>
+
+            <div id="predictionStatsContainer" style="margin-top:20px;display:none;">
+                <div class="predictions-grid" id="predictionsGrid"></div>
             </div>
         </div>
     </div>
 
+</div>
+
+<!-- EDIT ENROLLMENT MODAL -->
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>✏️ Edit Enrollment</h2>
+            <span class="close-modal" onclick="tracker.closeEditModal()">&times;</span>
+        </div>
+        
+        <form id="editEnrollmentForm" onsubmit="tracker.handleEditEnrollment(event)">
+            <div class="form-group">
+                <label>Program</label>
+                <input type="text" id="editProgramName" disabled style="width:100%;background:#f0f0f0;">
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Academic Year</label>
+                    <input type="text" id="editYear" disabled style="width:100%;background:#f0f0f0;">
+                </div>
+                <div class="form-group">
+                    <label>Semester</label>
+                    <input type="text" id="editSemester" disabled style="width:100%;background:#f0f0f0;">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Male Students</label>
+                    <input type="number" id="editMale" min="0" required style="width:100%;">
+                </div>
+                <div class="form-group">
+                    <label>Female Students</label>
+                    <input type="number" id="editFemale" min="0" required style="width:100%;">
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn-success">✅ Save Changes</button>
+                <button type="button" onclick="tracker.closeEditModal()" class="btn-secondary">Cancel</button>
+            </div>
+        </form>
+
+        <div id="editStatus" class="status"></div>
+    </div>
 </div>
 
 <?php endif; ?>
@@ -631,9 +748,11 @@ const programNames = {
 class EnrollmentTracker{
     constructor(){
         this.charts = {};
+        this.predictionChart = null;
         this.allEnrollments = [];
         this.allPrograms = [];
         this.allPredictions = [];
+        this.editingRecord = null;
         this.init();
     }
 
@@ -665,7 +784,8 @@ class EnrollmentTracker{
                 if(tabId === 'enrollments'){
                     this.refreshEnrollmentsTable();
                 }else if(tabId === 'predictions'){
-                    this.refreshPredictions();
+                    document.getElementById('predictionChartContainer').style.display = 'none';
+                    document.getElementById('predictionStatsContainer').style.display = 'none';
                 }else if(tabId === 'overview'){
                     this.loadAllProgramsCharts();
                 }
@@ -721,12 +841,9 @@ class EnrollmentTracker{
             const years = [...new Set(validData.map(e => e.academic_year))].sort().reverse();
 
             const enrollYearFilter = document.getElementById('enrollYearFilter');
-            const predYearFilter = document.getElementById('predYearFilter');
-
             const yearHtml = years.map(y => `<option value="${y}">${y}</option>`).join('');
             
             if(enrollYearFilter) enrollYearFilter.innerHTML = '<option value="">All Years</option>' + yearHtml;
-            if(predYearFilter) predYearFilter.innerHTML = '<option value="">All Years</option>' + yearHtml;
 
         }catch(e){
             console.error('Failed to load years:', e);
@@ -741,10 +858,10 @@ class EnrollmentTracker{
             .addEventListener('change',()=>this.refreshEnrollmentsTable());
 
         document.getElementById('predProgramFilter')
-            .addEventListener('change',()=>this.refreshPredictions());
-
-        document.getElementById('predYearFilter')
-            .addEventListener('change',()=>this.refreshPredictions());
+            .addEventListener('change',()=>{
+                document.getElementById('predictionChartContainer').style.display = 'none';
+                document.getElementById('predictionStatsContainer').style.display = 'none';
+            });
 
         document.getElementById('logoutBtn')
             .addEventListener('click',()=>{
@@ -752,6 +869,54 @@ class EnrollmentTracker{
                     window.location.href = 'api/logout.php';
                 }
             });
+
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            const modal = document.getElementById('editModal');
+            if(e.target === modal){
+                this.closeEditModal();
+            }
+        });
+    }
+
+    updateAvailableYears(){
+        const programId = document.getElementById('formProgram').value;
+        const yearSelect = document.getElementById('formYear');
+
+        if(!programId){
+            yearSelect.innerHTML = '<option value="">Select academic year</option>';
+            return;
+        }
+
+        // Get all existing years for this program
+        const existingYears = this.allEnrollments
+            .filter(e => e.program_id == programId)
+            .filter(e => {
+                const [startYear, endYear] = e.academic_year.split('-').map(y => parseInt(y));
+                return (endYear - startYear) === 1;
+            })
+            .map(e => e.academic_year);
+
+        const uniqueExistingYears = new Set(existingYears);
+
+        // Generate available years (next 5 years)
+        const currentYear = new Date().getFullYear();
+        const availableYears = [];
+        
+        for(let i = currentYear; i < currentYear + 5; i++){
+            const yearRange = `${i}-${i+1}`;
+            if(!uniqueExistingYears.has(yearRange)){
+                availableYears.push(yearRange);
+            }
+        }
+
+        if(availableYears.length === 0){
+            yearSelect.innerHTML = '<option value="">No available years for this program</option>';
+            return;
+        }
+
+        yearSelect.innerHTML = '<option value="">Select academic year</option>' +
+            availableYears.map(y => `<option value="${y}">${y}</option>`).join('');
     }
 
     async loadAllProgramsCharts(){
@@ -827,9 +992,9 @@ class EnrollmentTracker{
         });
 
         const labels = programData.map(e=>`${e.academic_year} S${e.semester}`);
+        const totals = programData.map(e=>(e.male||0)+(e.female||0));
         const males = programData.map(e=>e.male||0);
         const females = programData.map(e=>e.female||0);
-        const totals = programData.map(e=>(e.male||0)+(e.female||0));
 
         const ctx = document.getElementById(`chart-prog-${programId}`);
         if(!ctx) return;
@@ -839,23 +1004,42 @@ class EnrollmentTracker{
         }
 
         this.charts[programId] = new Chart(ctx, {
-            type: 'bar',
+            type: 'line',
             data: {
                 labels: labels,
                 datasets: [
                     {
+                        label: 'Total',
+                        data: totals,
+                        borderColor: '#ed8936',
+                        backgroundColor: 'rgba(237, 137, 54, 0.1)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#ed8936',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    },
+                    {
                         label: 'Male',
                         data: males,
-                        backgroundColor: 'rgba(43, 108, 176, 0.8)',
-                        borderColor: 'rgba(43, 108, 176, 1)',
-                        borderWidth: 1
+                        borderColor: '#2b6cb0',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#2b6cb0'
                     },
                     {
                         label: 'Female',
                         data: females,
-                        backgroundColor: 'rgba(213, 63, 140, 0.8)',
-                        borderColor: 'rgba(213, 63, 140, 1)',
-                        borderWidth: 1
+                        borderColor: '#d53f8c',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#d53f8c'
                     }
                 ]
             },
@@ -866,7 +1050,12 @@ class EnrollmentTracker{
                     datalabels: {
                         display: true,
                         font: {weight: 'bold', size: 12},
-                        color: 'white'
+                        color: '#2d3748',
+                        backgroundColor: 'rgba(255,255,255,0.9)',
+                        borderRadius: 4,
+                        padding: 6,
+                        anchor: 'end',
+                        align: 'top'
                     },
                     legend: {
                         display: true,
@@ -965,12 +1154,76 @@ class EnrollmentTracker{
                     <td><strong>${e.female}</strong></td>
                     <td><strong>${parseInt(e.male) + parseInt(e.female)}</strong></td>
                     <td>
+                        <button class="btn-warning btn-small" onclick="tracker.openEditModal(${e.id})">✏️ Edit</button>
                         <button class="btn-danger btn-small" onclick="tracker.deleteEnrollment(${e.id})">🗑️ Delete</button>
                     </td>
                 </tr>
             `).join('');
         }catch(e){
             this.showStatus('Error loading enrollments: '+e.message,'error');
+        }
+    }
+
+    openEditModal(recordId){
+        const record = this.allEnrollments.find(e => e.id == recordId);
+        if(!record) return;
+
+        this.editingRecord = record;
+
+        const programMap = {};
+        this.allPrograms.forEach(p => {
+            programMap[p.id] = p.name;
+        });
+
+        const semesterMap = {1:'First',2:'Second',3:'Summer'};
+
+        document.getElementById('editProgramName').value = programMap[record.program_id] || record.program_id;
+        document.getElementById('editYear').value = record.academic_year;
+        document.getElementById('editSemester').value = semesterMap[record.semester] || record.semester;
+        document.getElementById('editMale').value = record.male;
+        document.getElementById('editFemale').value = record.female;
+
+        document.getElementById('editModal').style.display = 'block';
+    }
+
+    closeEditModal(){
+        document.getElementById('editModal').style.display = 'none';
+        this.editingRecord = null;
+        document.getElementById('editStatus').style.display = 'none';
+    }
+
+    async handleEditEnrollment(event){
+        event.preventDefault();
+
+        if(!this.editingRecord){
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('id', this.editingRecord.id);
+        formData.append('male', document.getElementById('editMale').value);
+        formData.append('female', document.getElementById('editFemale').value);
+
+        try{
+            const res = await fetch('api/edit-enrollment.php',{
+                method:'POST',
+                body:formData
+            });
+
+            const result = await res.json();
+            if(result.success){
+                this.showStatus('✅ Enrollment updated','success','editStatus');
+                setTimeout(() => {
+                    this.closeEditModal();
+                    this.loadYears();
+                    this.loadAllProgramsCharts();
+                    this.refreshEnrollmentsTable();
+                }, 1000);
+            }else{
+                this.showStatus('❌ Error: '+result.message,'error','editStatus');
+            }
+        }catch(e){
+            this.showStatus('❌ Error updating enrollment','error','editStatus');
         }
     }
 
@@ -1071,59 +1324,192 @@ class EnrollmentTracker{
     async refreshPredictions(){
         try{
             const programFilter = document.getElementById('predProgramFilter').value;
-            const yearFilter = document.getElementById('predYearFilter').value;
 
-            let filtered = [...this.allPredictions];
-
-            if(programFilter){
-                filtered = filtered.filter(p => p.program_id == programFilter);
-            }
-            if(yearFilter){
-                filtered = filtered.filter(p => p.academic_year === yearFilter);
-            }
-
-            const grid = document.getElementById('predictionsGrid');
-            
-            if(filtered.length === 0){
-                grid.innerHTML = '<div class="text-center" style="padding:40px;grid-column:1/-1;">No predictions found</div>';
+            if(!programFilter){
+                this.showStatus('Please select a program','error','status');
                 return;
             }
 
-            const programMap = {};
-            this.allPrograms.forEach(p => {
-                programMap[p.id] = p.name;
+            // Get all enrollment data for this program
+            const allData = this.allEnrollments.filter(e => {
+                const [startYear, endYear] = e.academic_year.split('-').map(y => parseInt(y));
+                return (endYear - startYear) === 1 && e.program_id == programFilter;
             });
 
-            const semesterMap = {1:'First',2:'Second',3:'Summer'};
+            if(allData.length === 0){
+                this.showStatus('No historical data for this program','error','status');
+                return;
+            }
 
-            grid.innerHTML = filtered.map(p => `
-                <div class="prediction-card">
-                    <h4>${programMap[p.program_id] || p.program_id}</h4>
-                    <div class="prediction-item">
-                        <span class="prediction-label">Academic Year</span>
-                        <span class="prediction-value">${p.academic_year}</span>
-                    </div>
-                    <div class="prediction-item">
-                        <span class="prediction-label">Semester</span>
-                        <span class="prediction-value">${semesterMap[p.semester] || p.semester}</span>
-                    </div>
-                    <div class="prediction-item">
-                        <span class="prediction-label">Predicted Total</span>
-                        <span class="prediction-value">${p.predicted_total}</span>
-                    </div>
-                    <div class="prediction-item">
-                        <span class="prediction-label">Male / Female</span>
-                        <span class="prediction-value">${p.predicted_male || '—'} / ${p.predicted_female || '—'}</span>
-                    </div>
-                    <div class="prediction-item">
-                        <span class="prediction-label">Confidence</span>
-                        <span class="prediction-value">${(p.confidence * 100).toFixed(0)}%</span>
-                    </div>
-                </div>
-            `).join('');
+            // Get predictions for this program
+            const predictions = this.allPredictions.filter(p => p.program_id == programFilter);
+
+            // Create chart with historical data + prediction
+            this.createPredictionChart(programFilter, allData, predictions);
+
+            // Show stats
+            this.displayPredictionStats(predictions);
+
         }catch(e){
-            this.showStatus('Error loading predictions','error');
+            this.showStatus('Error loading predictions: '+e.message,'error','status');
         }
+    }
+
+    createPredictionChart(programId, historicalData, predictions){
+        historicalData.sort((a,b)=>{
+            const yearA=parseInt(a.academic_year.split('-')[0]);
+            const yearB=parseInt(b.academic_year.split('-')[0]);
+            return yearA-yearB||a.semester-b.semester;
+        });
+
+        const labels = historicalData.map(e=>`${e.academic_year} S${e.semester}`);
+        const totals = historicalData.map(e=>(e.male||0)+(e.female||0));
+        const males = historicalData.map(e=>e.male||0);
+        const females = historicalData.map(e=>e.female||0);
+
+        // Add prediction data
+        let allLabels = [...labels];
+        let allTotals = [...totals];
+        let allMales = [...males];
+        let allFemales = [...females];
+
+        if(predictions && predictions.length > 0){
+            const pred = predictions[0];
+            allLabels.push(`${pred.academic_year} (Pred)`);
+            allTotals.push(pred.predicted_total);
+            allMales.push(pred.predicted_male || 0);
+            allFemales.push(pred.predicted_female || 0);
+        }
+
+        const ctx = document.getElementById('predictionChart');
+        if(!ctx) return;
+
+        if(this.predictionChart){
+            this.predictionChart.destroy();
+        }
+
+        const programName = programNames[programId] || `Program ${programId}`;
+        document.getElementById('predictionChartTitle').textContent = `${programName} - Historical & Predicted Enrollment`;
+
+        this.predictionChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: allLabels,
+                datasets: [
+                    {
+                        label: 'Total',
+                        data: allTotals,
+                        borderColor: '#ed8936',
+                        backgroundColor: 'rgba(237, 137, 54, 0.1)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#ed8936',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    },
+                    {
+                        label: 'Male',
+                        data: allMales,
+                        borderColor: '#2b6cb0',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#2b6cb0'
+                    },
+                    {
+                        label: 'Female',
+                        data: allFemales,
+                        borderColor: '#d53f8c',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#d53f8c'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    datalabels: {
+                        display: true,
+                        font: {weight: 'bold', size: 12},
+                        color: '#2d3748',
+                        backgroundColor: 'rgba(255,255,255,0.9)',
+                        borderRadius: 4,
+                        padding: 6,
+                        anchor: 'end',
+                        align: 'top'
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value){
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        document.getElementById('predictionChartContainer').style.display = 'block';
+    }
+
+    displayPredictionStats(predictions){
+        const container = document.getElementById('predictionStatsContainer');
+        const grid = document.getElementById('predictionsGrid');
+
+        if(predictions.length === 0){
+            grid.innerHTML = '<div class="text-center" style="grid-column:1/-1;">No predictions available</div>';
+            container.style.display = 'block';
+            return;
+        }
+
+        const programMap = {};
+        this.allPrograms.forEach(p => {
+            programMap[p.id] = p.name;
+        });
+
+        const semesterMap = {1:'First',2:'Second',3:'Summer'};
+
+        grid.innerHTML = predictions.map(p => `
+            <div class="prediction-card">
+                <h4>${programMap[p.program_id] || p.program_id}</h4>
+                <div class="prediction-item">
+                    <span class="prediction-label">Academic Year</span>
+                    <span class="prediction-value">${p.academic_year}</span>
+                </div>
+                <div class="prediction-item">
+                    <span class="prediction-label">Semester</span>
+                    <span class="prediction-value">${semesterMap[p.semester] || p.semester}</span>
+                </div>
+                <div class="prediction-item">
+                    <span class="prediction-label">Predicted Total</span>
+                    <span class="prediction-value">${p.predicted_total}</span>
+                </div>
+                <div class="prediction-item">
+                    <span class="prediction-label">Male / Female</span>
+                    <span class="prediction-value">${p.predicted_male || '—'} / ${p.predicted_female || '—'}</span>
+                </div>
+                <div class="prediction-item">
+                    <span class="prediction-label">Confidence</span>
+                    <span class="prediction-value">${(p.confidence * 100).toFixed(0)}%</span>
+                </div>
+            </div>
+        `).join('');
+
+        container.style.display = 'block';
     }
 }
 
