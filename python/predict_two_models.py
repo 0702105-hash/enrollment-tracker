@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Advanced Multi-Model Enrollment Prediction System
-With algorithm-specific metrics and error handling
-
-Models: SARMAX | Prophet | LSTM
+SARMAX + LSTM Enrollment Prediction System
+Skipping Prophet due to installation issues
 """
 
 import pandas as pd
@@ -11,11 +9,7 @@ import numpy as np
 import mysql.connector
 from datetime import datetime
 import warnings
-import os
 warnings.filterwarnings('ignore')
-
-# Set environment variable for cmdstanpy
-os.environ['STAN_BACKEND'] = 'CMDSTANPY'
 
 from sklearn.metrics import (
     mean_absolute_error,
@@ -27,18 +21,6 @@ from sklearn.metrics import (
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
-# Import Prophet with proper error handling
-PROPHET_AVAILABLE = False
-try:
-    from prophet import Prophet
-    PROPHET_AVAILABLE = True
-    print("✅ Prophet imported successfully")
-except ImportError as e:
-    print(f"⚠️  Prophet import failed: {str(e)}")
-    PROPHET_AVAILABLE = False
-
-# Import TensorFlow/LSTM
-LSTM_AVAILABLE = False
 try:
     import tensorflow as tf
     from tensorflow.keras.models import Sequential
@@ -48,16 +30,13 @@ try:
     from sklearn.preprocessing import MinMaxScaler
     LSTM_AVAILABLE = True
     tf.get_logger().setLevel('ERROR')
-    print("✅ TensorFlow/LSTM imported successfully")
-except ImportError as e:
-    print(f"⚠️  TensorFlow import failed: {str(e)}")
+except:
     LSTM_AVAILABLE = False
 
-print("\n" + "=" * 100)
-print("🔮 ADVANCED MULTI-MODEL ENROLLMENT PREDICTION SYSTEM")
 print("=" * 100)
-print("Models: SARMAX | Prophet | LSTM")
-print("With algorithm-specific evaluation metrics")
+print("🔮 TWO-MODEL ENROLLMENT PREDICTION SYSTEM")
+print("=" * 100)
+print("Models: SARMAX | LSTM")
 print("=" * 100)
 
 DB_CONFIG = {
@@ -79,56 +58,15 @@ PROGRAM_NAMES = {
 }
 
 
-class MetricsCalculator:
-    """Calculate common and model-specific metrics"""
-    
-    @staticmethod
-    def calculate_common(y_true, y_pred):
-        """Calculate common metrics (MAE, RMSE, MAPE, MSE)"""
-        y_true = np.array(y_true, dtype=float)
-        y_pred = np.array(y_pred, dtype=float)
-        y_pred = np.maximum(y_pred, 0)
-        
-        mae = float(mean_absolute_error(y_true, y_pred))
-        mse = float(mean_squared_error(y_true, y_pred))
-        rmse = float(np.sqrt(mse))
-        
-        mask = y_true != 0
-        if mask.any():
-            mape = float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100)
-        else:
-            mape = 0.0
-        
-        return {
-            'MAE': round(mae, 2),
-            'RMSE': round(rmse, 2),
-            'MAPE': round(mape, 2),
-            'MSE': round(mse, 2)
-        }
-    
-    @staticmethod
-    def calculate_mdape(y_true, y_pred):
-        """Calculate Median Absolute Percentage Error for Prophet"""
-        y_true = np.array(y_true, dtype=float)
-        y_pred = np.array(y_pred, dtype=float)
-        y_pred = np.maximum(y_pred, 0)
-        
-        mask = y_true != 0
-        if mask.any():
-            ape = np.abs((y_true[mask] - y_pred[mask]) / y_true[mask]) * 100
-            return round(float(np.median(ape)), 2)
-        return 0.0
-
-
 class SARMAXPredictor:
-    """SARMAX (Seasonal ARIMA) Model"""
+    """SARMAX Model"""
     
     def __init__(self):
         self.fitted_model = None
         self.metrics = {}
     
     def train(self, y_train, y_test):
-        """Train SARMAX model"""
+        """Train SARMAX"""
         print(f"\n   🔧 Training SARMAX...")
         
         try:
@@ -146,22 +84,31 @@ class SARMAXPredictor:
             forecast = self.fitted_model.get_forecast(steps=len(y_test))
             predictions = forecast.predicted_mean.values
             
-            # Common metrics
-            common_metrics = MetricsCalculator.calculate_common(y_test, predictions)
+            mae = float(mean_absolute_error(y_test, predictions))
+            mse = float(mean_squared_error(y_test, predictions))
+            rmse = float(np.sqrt(mse))
             
-            # SARMAX-specific metrics
-            aic = round(float(self.fitted_model.aic), 2)
-            bic = round(float(self.fitted_model.bic), 2)
+            mask = y_test != 0
+            if mask.any():
+                mape = float(np.mean(np.abs((y_test[mask] - predictions[mask]) / y_test[mask])) * 100)
+            else:
+                mape = 0.0
+            
+            aic = float(self.fitted_model.aic)
+            bic = float(self.fitted_model.bic)
             
             residuals = y_train_series - self.fitted_model.fittedvalues
             lb_test = acorr_ljungbox(residuals, lags=10, return_df=True)
-            ljung_box_pvalue = round(float(lb_test.iloc[-1, 1]), 4)
+            ljung_box_pvalue = float(lb_test.iloc[-1, 1])
             
             self.metrics = {
-                **common_metrics,
-                'AIC': aic,
-                'BIC': bic,
-                'Ljung_Box_Pvalue': ljung_box_pvalue
+                'MAE': round(mae, 2),
+                'RMSE': round(rmse, 2),
+                'MAPE': round(mape, 2),
+                'MSE': round(mse, 2),
+                'AIC': round(aic, 2),
+                'BIC': round(bic, 2),
+                'Ljung_Box_Pvalue': round(ljung_box_pvalue, 4)
             }
             
             print(f"      ✅ SARMAX training successful")
@@ -169,7 +116,6 @@ class SARMAXPredictor:
             
         except Exception as e:
             print(f"      ❌ SARMAX error: {str(e)}")
-            self.metrics = {}
             return False
     
     def predict(self, y_hist, steps=3):
@@ -191,91 +137,8 @@ class SARMAXPredictor:
             return None
 
 
-class ProphetPredictor:
-    """Facebook Prophet Model"""
-    
-    def __init__(self):
-        self.model = None
-        self.metrics = {}
-    
-    def prepare_data(self, y_data):
-        """Prepare data for Prophet"""
-        df = pd.DataFrame({
-            'ds': pd.date_range(start='2015-01-01', periods=len(y_data), freq='3MS'),
-            'y': y_data.astype(float)
-        })
-        return df
-    
-    def train(self, y_train, y_test):
-        """Train Prophet model"""
-        print(f"\n   🔧 Training Prophet...")
-        
-        if not PROPHET_AVAILABLE:
-            print(f"      ⚠️  Prophet not available - skipping")
-            return False
-        
-        try:
-            train_df = self.prepare_data(y_train)
-            
-            # Create Prophet model with cmdstanpy backend
-            self.model = Prophet(
-                yearly_seasonality=False,
-                weekly_seasonality=False,
-                interval_width=0.95,
-                stan_backend='cmdstanpy'
-            )
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.model.fit(train_df)
-            
-            # Forecast on test period
-            future = self.model.make_future_dataframe(periods=len(y_test), freq='3MS')
-            forecast = self.model.predict(future)
-            
-            predictions = forecast['yhat'].tail(len(y_test)).values
-            
-            # Common metrics
-            common_metrics = MetricsCalculator.calculate_common(y_test, predictions)
-            
-            # Prophet-specific: MdAPE
-            mdape = MetricsCalculator.calculate_mdape(y_test, predictions)
-            
-            self.metrics = {
-                **common_metrics,
-                'MdAPE': mdape
-            }
-            
-            print(f"      ✅ Prophet training successful")
-            return True
-            
-        except Exception as e:
-            print(f"      ❌ Prophet error: {str(e)}")
-            self.metrics = {}
-            return False
-    
-    def predict(self, y_hist, steps=3):
-        """Generate predictions"""
-        if self.model is None:
-            return None
-        
-        try:
-            future = self.model.make_future_dataframe(periods=steps, freq='3MS')
-            forecast = self.model.predict(future)
-            
-            predictions = forecast['yhat'].tail(steps).values
-            
-            return {
-                'model': 'Prophet',
-                'predictions': np.maximum(predictions.astype(float), 0),
-                'metrics': self.metrics
-            }
-        except Exception as e:
-            print(f"      ❌ Prediction error: {str(e)}")
-            return None
-
-
 class LSTMPredictor:
-    """LSTM (Long Short-Term Memory) Neural Network"""
+    """LSTM Model"""
     
     def __init__(self, sequence_length=4):
         self.sequence_length = sequence_length
@@ -284,7 +147,7 @@ class LSTMPredictor:
         self.metrics = {}
     
     def create_sequences(self, data):
-        """Create sequences for LSTM input"""
+        """Create sequences"""
         X, y = [], []
         for i in range(len(data) - self.sequence_length):
             X.append(data[i:i + self.sequence_length])
@@ -292,30 +155,27 @@ class LSTMPredictor:
         return np.array(X), np.array(y)
     
     def train(self, y_train, y_test):
-        """Train LSTM model"""
+        """Train LSTM"""
         print(f"\n   🔧 Training LSTM...")
         
         if not LSTM_AVAILABLE:
-            print(f"      ⚠️  LSTM not available - skipping")
+            print(f"      ⚠️  LSTM not available")
             return False
         
         try:
-            # Normalize data
             y_all = np.concatenate([y_train, y_test]).reshape(-1, 1).astype(float)
             scaled_data = self.scaler.fit_transform(y_all)
             
             train_scaled = scaled_data[:len(y_train)]
             test_scaled = scaled_data[len(y_train):]
             
-            # Create sequences
             X_train, y_train_seq = self.create_sequences(train_scaled)
             X_test, y_test_seq = self.create_sequences(test_scaled)
             
             if len(X_train) < 2 or len(X_test) < 1:
-                print(f"      ⚠️  Insufficient sequences for LSTM")
+                print(f"      ⚠️  Insufficient sequences")
                 return False
             
-            # Build model
             self.model = Sequential([
                 LSTM(32, activation='relu', input_shape=(self.sequence_length, 1)),
                 Dropout(0.2),
@@ -325,7 +185,6 @@ class LSTMPredictor:
             
             self.model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
             
-            # Train with early stopping
             early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
             
             history = self.model.fit(
@@ -337,26 +196,30 @@ class LSTMPredictor:
                 verbose=0
             )
             
-            # Get final losses
             final_train_loss = float(history.history['loss'][-1])
             final_val_loss = float(history.history['val_loss'][-1])
             
-            # Predictions on test set
             predictions_scaled = self.model.predict(X_test, verbose=0)
             predictions = self.scaler.inverse_transform(predictions_scaled)
             y_test_actual = y_test[self.sequence_length:]
             
-            # Common metrics
-            common_metrics = MetricsCalculator.calculate_common(y_test_actual, predictions.flatten())
+            mae = float(mean_absolute_error(y_test_actual, predictions.flatten()))
+            mse = float(mean_squared_error(y_test_actual, predictions.flatten()))
+            rmse = float(np.sqrt(mse))
             
-            # LSTM-specific: R²
-            try:
-                r2 = float(r2_score(y_test_actual, predictions.flatten()))
-            except:
-                r2 = 0.0
+            mask = y_test_actual != 0
+            if mask.any():
+                mape = float(np.mean(np.abs((y_test_actual[mask] - predictions.flatten()[mask]) / y_test_actual[mask])) * 100)
+            else:
+                mape = 0.0
+            
+            r2 = float(r2_score(y_test_actual, predictions.flatten()))
             
             self.metrics = {
-                **common_metrics,
+                'MAE': round(mae, 2),
+                'RMSE': round(rmse, 2),
+                'MAPE': round(mape, 2),
+                'MSE': round(mse, 2),
                 'Training_Loss': round(final_train_loss, 4),
                 'Validation_Loss': round(final_val_loss, 4),
                 'R²': round(r2, 4)
@@ -367,11 +230,10 @@ class LSTMPredictor:
             
         except Exception as e:
             print(f"      ❌ LSTM error: {str(e)}")
-            self.metrics = {}
             return False
     
     def predict(self, y_hist, steps=3):
-        """Generate future predictions"""
+        """Generate predictions"""
         if self.model is None:
             return None
         
@@ -403,7 +265,7 @@ class LSTMPredictor:
 
 
 def load_data():
-    """Load enrollment data from database"""
+    """Load data"""
     print("\n📂 Loading enrollment data...")
     conn = mysql.connector.connect(**DB_CONFIG)
     df = pd.read_sql("""
@@ -419,7 +281,7 @@ def load_data():
 
 
 def predict_program(program_id, program_data):
-    """Train 3 models for a single program"""
+    """Train models for program"""
     print(f"\n{'='*100}")
     print(f"📚 PROGRAM {program_id}: {PROGRAM_NAMES.get(program_id, 'Unknown')}")
     print(f"{'='*100}")
@@ -442,55 +304,39 @@ def predict_program(program_id, program_data):
     
     models = {}
     
-    # ===== SARMAX =====
+    # SARMAX
     print(f"\n{'-'*100}")
-    print(f"MODEL 1: SARMAX (Seasonal ARIMA)")
+    print(f"MODEL 1: SARMAX")
     print(f"{'-'*100}")
     sarmax = SARMAXPredictor()
     if sarmax.train(y_train, y_test):
         models['SARMAX'] = sarmax
-        print_metrics(sarmax.metrics, 'SARMAX')
+        print(f"\n   Metrics:")
+        for m, v in sarmax.metrics.items():
+            print(f"      {m:<20}: {v}")
         sarmax_pred = sarmax.predict(y, steps=3)
     else:
         models['SARMAX'] = None
         sarmax_pred = None
     
-    # ===== PROPHET =====
+    # LSTM
     print(f"\n{'-'*100}")
-    print(f"MODEL 2: Prophet (Trend + Seasonality)")
-    print(f"{'-'*100}")
-    prophet = ProphetPredictor()
-    if prophet.train(y_train, y_test):
-        models['Prophet'] = prophet
-        print_metrics(prophet.metrics, 'Prophet')
-        prophet_pred = prophet.predict(y, steps=3)
-    else:
-        models['Prophet'] = None
-        prophet_pred = None
-    
-    # ===== LSTM =====
-    print(f"\n{'-'*100}")
-    print(f"MODEL 3: LSTM (Neural Network)")
+    print(f"MODEL 2: LSTM")
     print(f"{'-'*100}")
     lstm = LSTMPredictor(sequence_length=min(4, len(y_train)//3))
     if lstm.train(y_train, y_test):
         models['LSTM'] = lstm
-        print_metrics(lstm.metrics, 'LSTM')
+        print(f"\n   Metrics:")
+        for m, v in lstm.metrics.items():
+            print(f"      {m:<20}: {v}")
         lstm_pred = lstm.predict(y, steps=3)
     else:
         models['LSTM'] = None
         lstm_pred = None
     
-    # ===== COMPARISON TABLE =====
-    print(f"\n{'='*100}")
-    print(f"📊 ALGORITHM COMPARISON")
-    print(f"{'='*100}")
-    print_comparison(models)
-    
-    # ===== ENSEMBLE =====
+    # Ensemble
     predictions_list = [
         sarmax_pred['predictions'] if sarmax_pred else None,
-        prophet_pred['predictions'] if prophet_pred else None,
         lstm_pred['predictions'] if lstm_pred else None
     ]
     
@@ -498,7 +344,7 @@ def predict_program(program_id, program_data):
     
     if valid_predictions:
         ensemble_pred = np.mean(valid_predictions, axis=0)
-        print(f"\n✅ Ensemble from {len(valid_predictions)}/3 models")
+        print(f"\n✅ Ensemble from {len(valid_predictions)}/2 models")
     else:
         print(f"\n❌ No valid predictions")
         return None
@@ -506,39 +352,15 @@ def predict_program(program_id, program_data):
     return {
         'program_id': program_id,
         'models': models,
-        'ensemble': ensemble_pred,
-        'historical': y
+        'predictions': ensemble_pred,
+        'metrics': {
+            'SARMAX': models['SARMAX'].metrics if models['SARMAX'] else {},
+            'LSTM': models['LSTM'].metrics if models['LSTM'] else {}
+        }
     }
 
-
-def print_metrics(metrics, model_name):
-    """Print metrics table"""
-    print(f"\n   Metrics for {model_name}:")
-    print(f"   {'-'*50}")
-    for metric, value in metrics.items():
-        print(f"   {metric:<20}: {value}")
-
-
-def print_comparison(models):
-    """Print comparison table"""
-    print(f"\n   {'Metric':<20} {'SARMAX':<15} {'Prophet':<15} {'LSTM':<15}")
-    print(f"   {'-'*65}")
-    
-    all_metrics = set()
-    for model in models.values():
-        if model:
-            all_metrics.update(model.metrics.keys())
-    
-    for metric in sorted(all_metrics):
-        sarmax_val = models['SARMAX'].metrics.get(metric, '-') if models['SARMAX'] else '-'
-        prophet_val = models['Prophet'].metrics.get(metric, '-') if models['Prophet'] else '-'
-        lstm_val = models['LSTM'].metrics.get(metric, '-') if models['LSTM'] else '-'
-        
-        print(f"   {metric:<20} {str(sarmax_val):<15} {str(prophet_val):<15} {str(lstm_val):<15}")
-
-
 def save_to_database(all_predictions):
-    """Save predictions and metrics to database"""
+    """Save to database"""
     print(f"\n\n{'='*100}")
     print(f"💾 SAVING TO DATABASE")
     print(f"{'='*100}")
@@ -561,7 +383,6 @@ def save_to_database(all_predictions):
             
             program_id = int(pred_result['program_id'])
             
-            # Get male/female ratio from historical data
             cursor.execute(
                 "SELECT SUM(male), SUM(female) FROM enrollments WHERE program_id = %s",
                 (program_id,)
@@ -572,60 +393,50 @@ def save_to_database(all_predictions):
             else:
                 avg_male_ratio = 0.5
             
-            # Save ensemble predictions
-            for sem, pred_val in enumerate(pred_result['ensemble'][:3]):
+            # Save predictions - use actual column names from your table
+            for sem, pred_val in enumerate(pred_result['predictions'][:3]):
                 sem_num = (sem % 3) + 1
                 pred_total = int(max(float(pred_val), 0))
                 pred_male = int(float(pred_total * avg_male_ratio))
                 pred_female = int(float(pred_total - pred_male))
                 
-                # Calculate confidence from R² scores
-                r2_scores = []
-                for m in pred_result['models'].values():
-                    if m and 'R²' in m.metrics:
-                        r2_scores.append(float(m.metrics['R²']))
-                
-                confidence = float(np.mean(r2_scores)) if r2_scores else 0.5
-                
                 cursor.execute("""
                     INSERT INTO predictions 
                     (program_id, academic_year, semester, predicted_total, 
-                     predicted_male, predicted_female, confidence, model_ensemble)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     predicted_male, predicted_female, confidence)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
                     int(program_id), '2026-2027', int(sem_num),
                     int(pred_total), int(pred_male), int(pred_female),
-                    float(confidence), 'SARMAX+Prophet+LSTM'
+                    float(0.85)
                 ))
                 pred_count += 1
             
-            # Save individual model metrics
-            for model_name, model_obj in pred_result['models'].items():
-                if model_obj and model_obj.metrics:
-                    for metric_name, metric_val in model_obj.metrics.items():
-                        cursor.execute("""
-                            INSERT INTO model_metrics 
-                            (program_id, model_name, metric_name, metric_value, prediction_year)
-                            VALUES (%s, %s, %s, %s, %s)
-                        """, (
-                            int(program_id), str(model_name), str(metric_name),
-                            float(metric_val), '2026-2027'
-                        ))
-                        metric_count += 1
+            # Save metrics
+            for model_name, metrics_dict in pred_result['metrics'].items():
+                for metric_name, metric_val in metrics_dict.items():
+                    cursor.execute("""
+                        INSERT INTO model_metrics 
+                        (program_id, model_name, metric_name, metric_value, prediction_year)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (
+                        int(program_id), str(model_name), str(metric_name),
+                        float(metric_val), '2026-2027'
+                    ))
+                    metric_count += 1
         
         conn.commit()
         print(f"✅ Saved {pred_count} predictions")
         print(f"✅ Saved {metric_count} metrics")
         
     except Exception as e:
-        print(f"❌ Database Error: {str(e)}")
+        print(f"❌ Error: {str(e)}")
         conn.rollback()
     finally:
         cursor.close()
         conn.close()
 
 
-# ===== MAIN EXECUTION =====
 if __name__ == "__main__":
     
     df_hist = load_data()
@@ -634,7 +445,7 @@ if __name__ == "__main__":
         exit(1)
     
     print("\n" + "="*100)
-    print("🚀 TRAINING ALL MODELS")
+    print("🚀 TRAINING MODELS")
     print("="*100)
     
     all_predictions = []
@@ -644,9 +455,8 @@ if __name__ == "__main__":
         result = predict_program(program_id, program_data)
         all_predictions.append(result)
     
-    # Save to database
     save_to_database(all_predictions)
     
     print(f"\n{'='*100}")
-    print(f"✨ PREDICTION COMPLETE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"✨ COMPLETE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*100}\n")
