@@ -1,3 +1,29 @@
+<?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+session_start();
+
+// Check if user is logged in (from index.php POST or session)
+$isLoggedIn = false;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
+    if ($_POST['password'] === 'admin123') {
+        $_SESSION['logged_in'] = true;
+        $isLoggedIn = true;
+        header('Location: dashboard.php?login=1');
+        exit;
+    }
+}
+
+if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
+    $isLoggedIn = true;
+}
+
+// If not logged in and not showing login, redirect
+if (!$isLoggedIn && !isset($_GET['login'])) {
+    header('Location: index.php');
+    exit;
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -742,6 +768,52 @@ tbody tr:hover{
 
     <!-- ===== PREDICTIONS TAB ===== -->
     <div id="predictions" class="tab-content">
+        <!-- overview-style summary/cards for all predictions -->
+        <div class="summary-grid" id="predSummaryGrid"></div>
+
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
+                <h2>🔮 All Programs Predicted Enrollment Trend</h2>
+                <div class="select-container" style="margin:0;">
+                    <select id="predYearFilter" style="flex:1;max-width:180px;">
+                        <option value="">All Years</option>
+                    </select>
+                    <select id="predYearStart" style="flex:1;max-width:180px;">
+                        <option value="">Start Year</option>
+                    </select>
+                    <select id="predYearEnd" style="flex:1;max-width:180px;">
+                        <option value="">End Year</option>
+                    </select>
+                    <select id="predSemesterFilter" style="flex:1;max-width:160px;">
+                        <option value="">All Semesters</option>
+                        <option value="1">Semester 1</option>
+                        <option value="2">Semester 2</option>
+                        <option value="12">Semester 1 &amp; 2</option>
+                        <option value="3">Semester 3</option>
+                    </select>
+                    <button onclick="tracker.refreshCombinedPredChart()" style="margin:0;">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="chart-container" style="height:400px;">
+                <canvas id="combinedPredChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📈 Predicted Trends by Program</h2>
+
+            <div class="select-container">
+                <label style="margin-right:10px;font-weight:600;">View All Programs:</label>
+                <button onclick="tracker.loadAllPredictionsCharts()">🔄 Refresh All Charts</button>
+            </div>
+
+            <div id="predStatus" class="status" style="margin-top:15px;"></div>
+            <div class="programs-charts-grid" id="predictionsChartsGrid" style="margin-top:20px;">
+                <div class="text-center" style="padding:40px;grid-column:1/-1;">Loading charts...</div>
+            </div>
+        </div>
+
+        <!-- existing single-program predictions card retained -->
         <div class="card">
             <h2>🔮 Enrollment Predictions with Historical Data</h2>
 
@@ -833,6 +905,8 @@ class EnrollmentTracker{
         this.charts = {};
         this.predictionChart = null;
         this.combinedChart = null;
+        this.predCombinedChart = null;
+        this.predCharts = {};
         this.allEnrollments = [];
         this.allPrograms = [];
         this.allPredictions = [];
@@ -872,8 +946,13 @@ class EnrollmentTracker{
                 if(tabId === 'enrollments'){
                     this.refreshEnrollmentsTable();
                 }else if(tabId === 'predictions'){
+                    // hide single-program elements and refresh overview-style prediction panels
                     document.getElementById('predictionChartContainer').style.display = 'none';
                     document.getElementById('predictionStatsContainer').style.display = 'none';
+                    // build prediction overview
+                    this.renderPredSummary(this.allPredictions || []);
+                    this.refreshCombinedPredChart();
+                    this.loadAllPredictionsCharts();
                 }else if(tabId === 'overview'){
                     this.loadAllProgramsCharts();
                     this.refreshCombinedChart();
@@ -928,7 +1007,14 @@ class EnrollmentTracker{
                 return (endYear - startYear) === 1;
             });
             
-            const years = [...new Set(validData.map(e => e.academic_year))].sort().reverse();
+            // include any prediction-only years as well so filters cover future predictions
+            const yearsSet = new Set(validData.map(e => e.academic_year));
+            if(Array.isArray(this.allPredictions)){
+                this.allPredictions.forEach(p=>{
+                    if(p.academic_year) yearsSet.add(p.academic_year);
+                });
+            }
+            const years = [...yearsSet].sort().reverse();
 
             const enrollYearFilter = document.getElementById('enrollYearFilter');
             const yearHtml = years.map(y => `<option value="${y}">${y}</option>`).join('');
@@ -948,6 +1034,17 @@ class EnrollmentTracker{
             // make the end year default to the latest (first in sorted desc list)
             if(overviewYearEnd && years.length > 0) {
                 overviewYearEnd.value = years[0];
+            }
+
+            // also set up prediction filters using same year list
+            const predYearFilter = document.getElementById('predYearFilter');
+            const predYearStart = document.getElementById('predYearStart');
+            const predYearEnd = document.getElementById('predYearEnd');
+            if(predYearFilter) predYearFilter.innerHTML = '<option value="">All Years</option>' + yearHtml;
+            if(predYearStart) predYearStart.innerHTML = '<option value="">Start Year</option>' + yearHtml;
+            if(predYearEnd) predYearEnd.innerHTML = '<option value="">End Year</option>' + yearHtml;
+            if(predYearEnd && years.length > 0) {
+                predYearEnd.value = years[0];
             }
 
         }catch(e){
@@ -972,6 +1069,12 @@ class EnrollmentTracker{
 
         document.getElementById('overviewSemesterFilter')
             .addEventListener('change',()=>this.refreshCombinedChart());
+
+        // prediction overview filters
+        const predFilters = ['predYearFilter','predYearStart','predYearEnd','predSemesterFilter'];
+        predFilters.forEach(id=>{
+            document.getElementById(id)?.addEventListener('change',()=>this.refreshCombinedPredChart());
+        });
 
         document.getElementById('predProgramFilter')
             .addEventListener('change',()=>{
@@ -1290,6 +1393,9 @@ class EnrollmentTracker{
             // Calculate summary
             this.renderSummary(allData);
 
+            // ensure year filters include prediction years as well (re-run loadYears)
+            await this.loadYears();
+
             // Create charts for each program
             const grid = document.getElementById('programsChartsGrid');
             grid.innerHTML = '';
@@ -1466,6 +1572,432 @@ class EnrollmentTracker{
         </div>
         `;
     }
+
+    /* ---------- prediction overview helpers ---------- */
+    renderPredSummary(preds){
+        const grid = document.getElementById('predSummaryGrid');
+
+        const total = preds.reduce((sum,p) => sum + (parseInt(p.predicted_total)||0), 0);
+        const totalMale = preds.reduce((sum,p) => sum + (parseInt(p.predicted_male)||0), 0);
+        const totalFemale = preds.reduce((sum,p) => sum + (parseInt(p.predicted_female)||0), 0);
+
+        const programs = new Set(preds.map(p => p.program_id)).size;
+
+        grid.innerHTML=`
+        <div class="summary-card">
+            <h3>${total.toLocaleString()}</h3>
+            <p>Total Predicted</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>${totalMale.toLocaleString()}</h3>
+            <p>Male Prediction</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>${totalFemale.toLocaleString()}</h3>
+            <p>Female Prediction</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>${programs}</h3>
+            <p>Programs</p>
+        </div>
+        `;
+    }
+
+    async refreshCombinedPredChart(){
+        try{
+            // first gather historical enrollments with same filtering logic
+            let hist = [...this.allEnrollments].filter(e => {
+                const [sy,ey] = e.academic_year.split('-').map(y=>parseInt(y));
+                return (ey-sy)===1;
+            });
+
+            let preds = [...this.allPredictions];
+            const yearFilter = document.getElementById('predYearFilter').value;
+            const semFilter = document.getElementById('predSemesterFilter').value;
+            const startFilter = document.getElementById('predYearStart').value;
+            const endFilter = document.getElementById('predYearEnd').value;
+
+            const applyFilter = item => {
+                if(yearFilter && item.academic_year !== yearFilter) return false;
+                if(startFilter){
+                    const startYear = parseInt(startFilter.split('-')[0]);
+                    if(parseInt(item.academic_year.split('-')[0]) < startYear) return false;
+                }
+                if(endFilter){
+                    const endYear = parseInt(endFilter.split('-')[0]);
+                    if(parseInt(item.academic_year.split('-')[0]) > endYear) return false;
+                }
+                if(semFilter){
+                    if(semFilter === '1' || semFilter === '2' || semFilter === '3'){
+                        if(parseInt(item.semester) !== parseInt(semFilter)) return false;
+                    } else if(semFilter === '12'){
+                        if(!(parseInt(item.semester) === 1 || parseInt(item.semester) === 2)) return false;
+                    }
+                }
+                return true;
+            };
+
+            hist = hist.filter(applyFilter);
+            preds = preds.filter(applyFilter);
+
+            // aggregate both sets separately
+            const histAgg = {};
+            hist.forEach(e => {
+                let key = e.academic_year;
+                if(!semFilter || semFilter === '12'){
+                    key = `${e.academic_year} S${e.semester}`;
+                }
+                if(!histAgg[key]) histAgg[key] = { total:0, male:0, female:0 };
+                histAgg[key].male += parseInt(e.male)||0;
+                histAgg[key].female += parseInt(e.female)||0;
+                histAgg[key].total += (parseInt(e.male)||0)+(parseInt(e.female)||0);
+            });
+            const predAgg = {};
+            preds.forEach(p => {
+                let key = p.academic_year;
+                if(!semFilter || semFilter === '12'){
+                    key = `${p.academic_year} S${p.semester}`;
+                }
+                if(!predAgg[key]) predAgg[key] = { total:0, male:0, female:0 };
+                predAgg[key].male += parseInt(p.predicted_male)||0;
+                predAgg[key].female += parseInt(p.predicted_female)||0;
+                predAgg[key].total += parseInt(p.predicted_total)||0;
+            });
+
+            // unify keys and mark existence
+            const allKeys = new Set([...Object.keys(histAgg), ...Object.keys(predAgg)]);
+            const chartData = [];
+            allKeys.forEach(key => {
+                let academic_year = key;
+                let semester = null;
+                if(key.includes(' S')){
+                    const parts = key.split(' S');
+                    academic_year = parts[0];
+                    semester = parts[1];
+                }
+                chartData.push({
+                    academic_year,
+                    semester,
+                    histTotal: histAgg[key]?.total || 0,
+                    histMale: histAgg[key]?.male || 0,
+                    histFemale: histAgg[key]?.female || 0,
+                    predTotal: predAgg[key]?.total || null,
+                    predMale: predAgg[key]?.male || null,
+                    predFemale: predAgg[key]?.female || null,
+                    hasPred: !!predAgg[key],
+                    hasHist: !!histAgg[key]
+                });
+            });
+
+            this.createCombinedPredChart(chartData);
+        }catch(e){
+            this.showStatus('Error loading predicted combined chart: '+e.message,'error');
+        }
+    }
+
+    createCombinedPredChart(chartData){
+        const container = document.getElementById('combinedPredChart').closest('.chart-container');
+        if(chartData.length === 0){
+            if(container) container.style.display = 'none';
+            return;
+        }
+        if(container) container.style.display = 'block';
+
+        chartData.sort((a,b)=>{
+            const yearA=parseInt(a.academic_year.split('-')[0]);
+            const yearB=parseInt(b.academic_year.split('-')[0]);
+            if(yearA !== yearB) return yearA - yearB;
+            if(a.semester != null && b.semester != null){
+                return a.semester - b.semester;
+            }
+            return 0;
+        });
+
+        const labels = chartData.map(e=>{
+            let label = '';
+            if(e.semester != null){
+                label = `${e.academic_year} S${e.semester}`;
+            }else{
+                label = `${e.academic_year}`;
+            }
+            // Append (Pred) if this row has predictions but no historical data
+            if(e.hasPred && !e.hasHist){
+                label += ' (Pred)';
+            }
+            return label;
+        });
+        const histTotals = chartData.map(e=>e.hasHist ? e.histTotal : null);
+        const histMales = chartData.map(e=>e.hasHist ? e.histMale : null);
+        const histFemales = chartData.map(e=>e.hasHist ? e.histFemale : null);
+        const predTotals = chartData.map(e=> e.hasPred ? e.predTotal : null);
+        const predMales = chartData.map(e=> e.hasPred ? e.predMale : null);
+        const predFemales = chartData.map(e=> e.hasPred ? e.predFemale : null);
+
+        const predPointRadius = chartData.map(e => e.hasPred ? 6 : 0);
+
+        const ctx = document.getElementById('combinedPredChart');
+        if(!ctx) return;
+
+        if(this.predCombinedChart){
+            this.predCombinedChart.destroy();
+        }
+
+        this.predCombinedChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    // historical series
+                    {
+                        label: 'Total',
+                        data: histTotals,
+                        borderColor: '#ed8936',
+                        backgroundColor: 'rgba(237, 137, 54, 0.15)',
+                        borderWidth: 4,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 8,
+                        pointBackgroundColor: '#ed8936',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    },
+                    {
+                        label: 'Male',
+                        data: histMales,
+                        borderColor: '#2b6cb0',
+                        backgroundColor: 'rgba(43, 108, 176, 0.05)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#2b6cb0'
+                    },
+                    {
+                        label: 'Female',
+                        data: histFemales,
+                        borderColor: '#d53f8c',
+                        backgroundColor: 'rgba(213, 63, 140, 0.05)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#d53f8c'
+                    },
+                    // predicted series dashed
+                    {
+                        label: 'Predicted Total',
+                        data: predTotals,
+                        borderColor: '#ed8936',
+                        borderDash: [6,4],
+                        backgroundColor: 'rgba(237, 137, 54, 0.0)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        spanGaps: false,
+                        pointRadius: predPointRadius,
+                        pointBackgroundColor: '#ed8936'
+                    },
+                    {
+                        label: 'Predicted Male',
+                        data: predMales,
+                        borderColor: '#2b6cb0',
+                        borderDash: [6,4],
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        spanGaps: false,
+                        pointRadius: predPointRadius,
+                        pointBackgroundColor: '#2b6cb0'
+                    },
+                    {
+                        label: 'Predicted Female',
+                        data: predFemales,
+                        borderColor: '#d53f8c',
+                        borderDash: [6,4],
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.4,
+                        spanGaps: false,
+                        pointRadius: predPointRadius,
+                        pointBackgroundColor: '#d53f8c'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    datalabels: {
+                        display: true,
+                        font: {weight: 'bold', size: 12},
+                        color: '#2d3748',
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        borderRadius: 4,
+                        padding: 6,
+                        anchor: 'end',
+                        align: 'top'
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value){
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    async loadAllPredictionsCharts(){
+        try{
+            this.showStatus('Loading prediction charts...', 'success', 'predStatus');
+            const grid = document.getElementById('predictionsChartsGrid');
+            grid.innerHTML = '';
+
+            for(let programId of Object.keys(programNames).map(Number)){
+                const progPreds = this.allPredictions.filter(p => p.program_id == programId);
+                if(progPreds.length === 0) continue;
+
+                const card = document.createElement('div');
+                card.className = 'program-chart-card';
+
+                const total = progPreds.reduce((sum,p)=> sum + (parseInt(p.predicted_total)||0),0);
+                const totalMale = progPreds.reduce((sum,p)=> sum + (parseInt(p.predicted_male)||0),0);
+                const totalFemale = progPreds.reduce((sum,p)=> sum + (parseInt(p.predicted_female)||0),0);
+
+                card.innerHTML = `
+                    <h3>${programNames[programId]}</h3>
+                    <div class="program-stats">
+                        <div class="stat-item">Total: <strong>${total}</strong></div>
+                        <div class="stat-item">Male: <strong>${totalMale}</strong></div>
+                        <div class="stat-item">Female: <strong>${totalFemale}</strong></div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="pred-chart-prog-${programId}"></canvas>
+                    </div>
+                `;
+                grid.appendChild(card);
+
+                // render chart after DOM insertion
+                setTimeout(() => {
+                    this.createPredProgramChart(programId, progPreds);
+                }, 100);
+            }
+
+            this.showStatus('Prediction charts loaded','success','predStatus');
+        }catch(e){
+            this.showStatus('Error loading prediction charts: '+e.message,'error','predStatus');
+        }
+    }
+
+    createPredProgramChart(programId, preds){
+        // also retrieve historical enrollments for same program
+        let hist = this.allEnrollments.filter(e=>e.program_id==programId);
+        hist = hist.filter(e=>{
+            const [sy,ey] = e.academic_year.split('-').map(y=>parseInt(y));
+            return (ey-sy)===1;
+        });
+
+        // aggregate both sets
+        const histAgg = {};
+        hist.forEach(e => {
+            const key = `${e.academic_year} S${e.semester}`;
+            if(!histAgg[key]) histAgg[key]={total:0,male:0,female:0};
+            histAgg[key].male += parseInt(e.male)||0;
+            histAgg[key].female += parseInt(e.female)||0;
+            histAgg[key].total += (parseInt(e.male)||0)+(parseInt(e.female)||0);
+        });
+        const predAgg = {};
+        preds.forEach(p=>{
+            const key = `${p.academic_year} S${p.semester}`;
+            if(!predAgg[key]) predAgg[key]={total:0,male:0,female:0};
+            predAgg[key].male += parseInt(p.predicted_male)||0;
+            predAgg[key].female += parseInt(p.predicted_female)||0;
+            predAgg[key].total += parseInt(p.predicted_total)||0;
+        });
+
+        const allKeys = new Set([...Object.keys(histAgg), ...Object.keys(predAgg)]);
+        const chartData = [];
+        allKeys.forEach(key=>{
+            chartData.push({
+                label: key,
+                histTotal: histAgg[key]?.total||0,
+                histMale: histAgg[key]?.male||0,
+                histFemale: histAgg[key]?.female||0,
+                predTotal: predAgg[key]?.total||null,
+                predMale: predAgg[key]?.male||null,
+                predFemale: predAgg[key]?.female||null,
+                hasPred: !!predAgg[key],
+                hasHist: !!histAgg[key]
+            });
+        });
+
+        chartData.sort((a,b)=>{
+            const yrA = parseInt(a.label.split(' ')[0]);
+            const yrB = parseInt(b.label.split(' ')[0]);
+            if(yrA !== yrB) return yrA-yrB;
+            const sA = parseInt(a.label.split('S')[1]);
+            const sB = parseInt(b.label.split('S')[1]);
+            return sA-sB;
+        });
+
+        const labels = chartData.map(e=>{
+            let lbl = e.label;
+            if(e.hasPred && !e.hasHist) lbl += ' (Pred)';
+            return lbl;
+        });
+        const histTotals = chartData.map(e=>e.hasHist ? e.histTotal : null);
+        const histMales = chartData.map(e=>e.hasHist ? e.histMale : null);
+        const histFemales = chartData.map(e=>e.hasHist ? e.histFemale : null);
+        const predTotals = chartData.map(e=> e.hasPred ? e.predTotal : null);
+        const predMales = chartData.map(e=> e.hasPred ? e.predMale : null);
+        const predFemales = chartData.map(e=> e.hasPred ? e.predFemale : null);
+
+        const predPointRadius = chartData.map(e => e.hasPred ? 6 : 0);
+
+        const ctx = document.getElementById(`pred-chart-prog-${programId}`);
+        if(!ctx) return;
+        if(this.predCharts == null) this.predCharts = {};
+        if(this.predCharts[programId]){
+            this.predCharts[programId].destroy();
+        }
+
+        this.predCharts[programId] = new Chart(ctx, {
+            type:'line',
+            data:{
+                labels,
+                datasets:[
+                    {label:'Total', data:histTotals, borderColor:'#ed8936', backgroundColor:'rgba(237,137,54,0.1)', borderWidth:3, fill:true, tension:0.4, pointRadius:6, pointBackgroundColor:'#ed8936', pointBorderColor:'#fff', pointBorderWidth:2},
+                    {label:'Male', data:histMales, borderColor:'#2b6cb0', borderWidth:2, fill:false, tension:0.4, pointRadius:5, pointBackgroundColor:'#2b6cb0'},
+                    {label:'Female', data:histFemales, borderColor:'#d53f8c', borderWidth:2, fill:false, tension:0.4, pointRadius:5, pointBackgroundColor:'#d53f8c'},
+                    {label:'Predicted Total', data:predTotals, borderColor:'#ed8936', borderDash:[6,4], backgroundColor:'rgba(237,137,54,0)', borderWidth:2, fill:false, tension:0.4, spanGaps:false, pointRadius:predPointRadius, pointBackgroundColor:'#ed8936'},
+                    {label:'Predicted Male', data:predMales, borderColor:'#2b6cb0', borderDash:[6,4], borderWidth:2, fill:false, tension:0.4, spanGaps:false, pointRadius:predPointRadius, pointBackgroundColor:'#2b6cb0'},
+                    {label:'Predicted Female', data:predFemales, borderColor:'#d53f8c', borderDash:[6,4], borderWidth:2, fill:false, tension:0.4, spanGaps:false, pointRadius:predPointRadius, pointBackgroundColor:'#d53f8c'}
+                ]
+            },
+            options:{
+                responsive:true,
+                maintainAspectRatio:false,
+                plugins:{
+                    datalabels:{display:true,font:{weight:'bold',size:12},color:'#2d3748',backgroundColor:'rgba(255,255,255,0.9)',borderRadius:4,padding:6,anchor:'end',align:'top'},
+                    legend:{display:true,position:'top'}
+                },
+                scales:{y:{beginAtZero:true,ticks:{callback:function(v){return v.toLocaleString();}}}}
+            }
+        });
+    }
+
 
     async refreshEnrollmentsTable(){
         try{
