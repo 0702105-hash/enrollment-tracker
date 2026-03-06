@@ -165,7 +165,8 @@ class SARMAXPredictor:
             # If predictions not enough, make forecast
             if len(predictions) < len(y_test):
                 forecast = self.fitted_model.get_forecast(steps=len(y_test))
-                predictions = forecast.predicted_mean.values
+                predictions = np.array(forecast.predicted_mean)
+
             
             self.metrics = ModelEvaluator.calculate_metrics(y_test, predictions, "SARMAX")
             return True
@@ -181,13 +182,13 @@ class SARMAXPredictor:
         
         try:
             forecast = self.fitted_model.get_forecast(steps=steps)
-            predictions = forecast.predicted_mean.values
+            predictions = np.array(forecast.predicted_mean)
             conf_int = forecast.conf_int()
             
             return {
                 'predictions': np.maximum(predictions, 0),  # Ensure non-negative
-                'lower_ci': np.maximum(conf_int.iloc[:, 0].values, 0),
-                'upper_ci': np.maximum(conf_int.iloc[:, 1].values, 0),
+                'lower_ci': np.maximum(np.array(conf_int.iloc[:, 0]), 0),
+                'upper_ci': np.maximum(np.array(conf_int.iloc[:, 1]), 0),
                 'metrics': self.metrics
             }
         except Exception as e:
@@ -466,7 +467,10 @@ def predict_for_program(program_id, program_data, future_years=1):
     
     if sarmax_success:
         sarmax_pred = sarmax_predictor.predict(steps=future_years*3)  # 3 semesters per year
-        ModelEvaluator.print_metrics(sarmax_pred['metrics'], "SARMAX")
+        if sarmax_pred is not None and sarmax_pred.get('metrics'):
+            ModelEvaluator.print_metrics(sarmax_pred['metrics'], "SARMAX")
+        else:
+            print(f"      ⚠️  SARMAX prediction failed")
     else:
         sarmax_pred = None
         print(f"      ⚠️  SARMAX model could not be trained")
