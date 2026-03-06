@@ -522,11 +522,6 @@ tbody tr:hover{
 <!-- DASHBOARD -->
 <div class="container" id="dashboard" style="display:none;">
 
-    <!-- NOTICE -->
-    <div class="notice">
-        <strong>📢 Notice:</strong> Dashboard v3 - Editable enrollments, smart year selection, visible numbers
-    </div>
-
     <!-- HEADER -->
     <div class="header-banner">
         <h1>📊 Enrollment Tracker System</h1>
