@@ -58,6 +58,9 @@ Notes and troubleshooting
   run only the prediction script (step 5).
 - The prediction script currently generates predictions for Semester 1 of
   academic year 2026-2027 only.
+- For `predict_multi_models.py`, make sure dependencies are refreshed after
+  pulling latest changes:
+  `python -m pip install -r python\\requirements.txt`
 
 Advanced: Recreate venv `pip` wrappers
 -------------------------------------
