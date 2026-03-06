@@ -226,7 +226,7 @@ class ProphetPredictor:
         try:
             # Create training dataframe
             train_df = self.prepare_data(
-                pd.DataFrame({value: y_train}),
+                pd.DataFrame({'value': y_train}),
                 'value'
             )
             

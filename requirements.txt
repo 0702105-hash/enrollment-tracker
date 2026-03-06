@@ -1,7 +1,7 @@
 pandas
 numpy
 statsmodels
-prophet
+prophet==1.1.5
 tensorflow
 keras
 scikit-learn
@@ -10,7 +10,6 @@ mysql-connector-python
 openpyxl
 xlrd
 cmdstanpy
-pystan
 matplotlib
 seaborn
 scipy
