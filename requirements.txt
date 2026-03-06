@@ -1,0 +1,17 @@
+pandas
+numpy
+statsmodels
+prophet
+tensorflow
+keras
+scikit-learn
+joblib
+mysql-connector-python
+openpyxl
+xlrd
+cmdstanpy
+pystan
+matplotlib
+seaborn
+scipy
+pytz

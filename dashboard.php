@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Enrollment Tracker Dashboard</title>
+<title>Enrollment Tracker Dashboard - Multi-Model Predictions</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 
@@ -40,7 +40,6 @@ body{
 }
 
 .header-banner::before{
-    /* subtle dark overlay so text remains readable on images */
     content:'';
     position:absolute;
     left:0;right:0;top:0;bottom:0;
@@ -51,7 +50,7 @@ body{
 
 .header-banner h1,
 .header-banner p{
-    position:relative; /* above overlay */
+    position:relative;
     z-index:1;
 }
 
@@ -64,19 +63,6 @@ body{
 .header-banner p{
     opacity:.95;
     font-size:14px;
-}
-
-/* Time-of-day background classes. These reference files in the workspace `assets/` folder.
-   Update filenames/extensions if your assets use different names. Fallback keeps the
-   original gradient if images are missing. */
-.header-banner.day{
-    background-image: url('assets/day_v1.png');
-}
-.header-banner.afternoon{
-    background-image: url('assets/afternoon_v1.png');
-}
-.header-banner.night{
-    background-image: url('assets/night_v1.png');
 }
 
 /* ===== NOTICE ===== */
@@ -111,6 +97,7 @@ body{
     gap:10px;
     margin-bottom:20px;
     border-bottom:2px solid #e2e8f0;
+    overflow-x:auto;
 }
 
 .tab-btn{
@@ -122,6 +109,7 @@ body{
     font-weight:600;
     color:#718096;
     transition:all 0.3s;
+    white-space:nowrap;
 }
 
 .tab-btn:hover{
@@ -207,6 +195,16 @@ button.btn-warning{
 
 button.btn-warning:hover{
     background:#ed8936;
+}
+
+button.btn-info{
+    background:#3182ce;
+    padding:10px 16px;
+    font-size:13px;
+}
+
+button.btn-info:hover{
+    background:#2c5282;
 }
 
 /* ===== STATUS ===== */
@@ -301,6 +299,111 @@ button.btn-warning:hover{
     margin-top:15px;
 }
 
+/* ===== MULTI-MODEL PREDICTION DISPLAY ===== */
+
+.model-metrics-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+    gap:20px;
+    margin:20px 0;
+}
+
+.model-card{
+    background:white;
+    border-radius:12px;
+    padding:20px;
+    border-left:5px solid #2b6cb0;
+    box-shadow:0 4px 15px rgba(0,0,0,0.08);
+}
+
+.model-card.sarmax{border-left-color:#667eea;}
+.model-card.prophet{border-left-color:#f093fb;}
+.model-card.lstm{border-left-color:#ed8936;}
+
+.model-card h4{
+    margin-bottom:15px;
+    color:#2d3748;
+    font-size:16px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+
+.model-badge{
+    display:inline-block;
+    padding:3px 10px;
+    border-radius:20px;
+    font-size:11px;
+    font-weight:600;
+}
+
+.model-badge.sarmax{background:#e6e6ff;color:#667eea;}
+.model-badge.prophet{background:#ffe6f5;color:#f093fb;}
+.model-badge.lstm{background:#fff5e6;color:#ed8936;}
+
+.metric-item{
+    display:flex;
+    justify-content:space-between;
+    padding:8px 0;
+    border-bottom:1px solid #e2e8f0;
+    font-size:14px;
+}
+
+.metric-item:last-child{
+    border-bottom:none;
+}
+
+.metric-label{
+    color:#718096;
+    font-weight:500;
+}
+
+.metric-value{
+    font-weight:600;
+    color:#2d3748;
+}
+
+.prediction-comparison-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+    gap:20px;
+    margin:20px 0;
+}
+
+.prediction-comparison-card{
+    background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+    color:white;
+    border-radius:16px;
+    padding:20px;
+    box-shadow:0 8px 25px rgba(0,0,0,0.1);
+}
+
+.prediction-comparison-card h4{
+    margin-bottom:15px;
+    font-size:16px;
+}
+
+.prediction-row{
+    display:flex;
+    justify-content:space-between;
+    padding:10px 0;
+    border-bottom:1px solid rgba(255,255,255,0.2);
+}
+
+.prediction-row:last-child{
+    border-bottom:none;
+}
+
+.prediction-row-label{
+    font-size:13px;
+    opacity:0.9;
+}
+
+.prediction-row-value{
+    font-weight:600;
+    font-size:14px;
+}
+
 /* ===== TABLE ===== */
 
 .table-container{
@@ -328,7 +431,6 @@ th{
     color:#2d3748;
 }
 
-/* sortable table headers */
 th.sortable{
     cursor:pointer;
 }
@@ -393,8 +495,10 @@ tbody tr:hover{
     border:1px solid #888;
     border-radius:18px;
     width:90%;
-    max-width:500px;
+    max-width:600px;
     box-shadow:0 8px 25px rgba(0,0,0,0.2);
+    max-height:90vh;
+    overflow-y:auto;
 }
 
 .modal-header{
@@ -539,9 +643,17 @@ tbody tr:hover{
         grid-template-columns:1fr;
     }
 
+    .model-metrics-grid{
+        grid-template-columns:1fr;
+    }
+
     .modal-content{
         width:95%;
         margin:20% auto;
+    }
+
+    .tabs{
+        overflow-x:auto;
     }
 }
 </style>
@@ -569,16 +681,18 @@ tbody tr:hover{
     <!-- HEADER -->
     <div class="header-banner">
         <h1>📊 Enrollment Tracker System</h1>
-        <p>Predictive analytics for CAS programs | All Programs Dashboard</p>
+        <p>Predictive Analytics Dashboard - SARMAX | Prophet | LSTM Ensemble</p>
     </div>
 
     <!-- TABS -->
     <div class="card">
         <div class="tabs">
-            <button class="tab-btn active" data-tab="overview">📊 Overview (All Programs)</button>
+            <button class="tab-btn active" data-tab="overview">📊 Overview</button>
             <button class="tab-btn" data-tab="enrollments">👥 Enrollments</button>
             <button class="tab-btn" data-tab="add-enrollment">➕ Add Enrollment</button>
-            <button class="tab-btn" data-tab="predictions">🔮 Predictions</button>
+            <button class="tab-btn" data-tab="predictions">🔮 Single-Year Predictions</button>
+            <button class="tab-btn" data-tab="multi-predictions">📈 Multi-Year Predictions</button>
+            <button class="tab-btn" data-tab="model-details">🤖 Model Metrics</button>
         </div>
     </div>
 
@@ -596,27 +710,10 @@ tbody tr:hover{
                     <select id="overviewYearFilter" style="flex:1;max-width:180px;">
                         <option value="">All Years</option>
                     </select>
-                    <select id="overviewYearStart" style="flex:1;max-width:180px;">
-                        <option value="">Start Year</option>
-                        <option value="2015-2016">2015-2016</option>
-                        <option value="2016-2017">2016-2017</option>
-                        <option value="2017-2018">2017-2018</option>
-                        <option value="2018-2019">2018-2019</option>
-                        <option value="2019-2020">2019-2020</option>
-                    </select>
-                    <select id="overviewYearEnd" style="flex:1;max-width:180px;">
-                        <option value="">End Year</option>
-                        <option value="2015-2016">2015-2016</option>
-                        <option value="2016-2017">2016-2017</option>
-                        <option value="2017-2018">2017-2018</option>
-                        <option value="2018-2019">2018-2019</option>
-                        <option value="2019-2020">2019-2020</option>
-                    </select>
                     <select id="overviewSemesterFilter" style="flex:1;max-width:160px;">
                         <option value="">All Semesters</option>
                         <option value="1">Semester 1</option>
                         <option value="2">Semester 2</option>
-                        <option value="12">Semester 1 &amp; 2</option>
                         <option value="3">Semester 3</option>
                     </select>
                     <button onclick="tracker.refreshCombinedChart()" style="margin:0;">🔄 Refresh</button>
@@ -735,10 +832,10 @@ tbody tr:hover{
         </div>
     </div>
 
-    <!-- ===== PREDICTIONS TAB ===== -->
+    <!-- ===== SINGLE-YEAR PREDICTIONS TAB ===== -->
     <div id="predictions" class="tab-content">
         <div class="card">
-            <h2>🔮 Enrollment Predictions with Historical Data</h2>
+            <h2>🔮 Single-Year Predictions (2026-2027)</h2>
 
             <div class="select-container">
                 <label style="margin-right:10px;font-weight:600;">Select Program:</label>
@@ -755,8 +852,287 @@ tbody tr:hover{
                 </div>
             </div>
 
+            <!-- Model Comparison -->
+            <div id="modelComparisonContainer" style="margin-top:20px;display:none;">
+                <h3 style="margin-bottom:20px;">📊 Model Predictions Comparison</h3>
+                <div class="prediction-comparison-grid" id="modelComparisonGrid"></div>
+            </div>
+
+            <!-- Model Metrics -->
+            <div id="modelMetricsContainer" style="margin-top:20px;display:none;">
+                <h3 style="margin-bottom:20px;">📈 Model Performance Metrics</h3>
+                <div class="model-metrics-grid" id="modelMetricsGrid"></div>
+            </div>
+
             <div id="predictionStatsContainer" style="margin-top:20px;display:none;">
+                <h3 style="margin-bottom:20px;">🔮 Ensemble Predictions</h3>
                 <div class="predictions-grid" id="predictionsGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== MULTI-YEAR PREDICTIONS TAB ===== -->
+    <div id="multi-predictions" class="tab-content">
+        <div class="card">
+            <h2>📈 Multi-Year Forecast</h2>
+            <p style="color:#718096;margin-bottom:20px;">Select a program and number of years to forecast enrollment trends</p>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Select Program <span style="color:red">*</span></label>
+                    <select id="multiPredProgramFilter" style="width:100%;">
+                        <option value="">Choose a program</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Forecast Years <span style="color:red">*</span></label>
+                    <select id="multiPredYearsFilter" style="width:100%;">
+                        <option value="1">1 Year Ahead (2026-2027)</option>
+                        <option value="2">2 Years Ahead (2026-2028)</option>
+                        <option value="3">3 Years Ahead (2026-2029)</option>
+                        <option value="4">4 Years Ahead (2026-2030)</option>
+                        <option value="5">5 Years Ahead (2026-2031)</option>
+                    </select>
+                </div>
+                <div style="display:flex;align-items:flex-end;gap:10px;">
+                    <button onclick="tracker.loadMultiYearPredictions()">📊 Generate Forecast</button>
+                    <button onclick="tracker.downloadForecastCSV()" class="btn-info">⬇️ Export CSV</button>
+                </div>
+            </div>
+
+            <div id="multiPredChartContainer" style="margin-top:30px;display:none;">
+                <div class="chart-container" style="height:450px;">
+                    <canvas id="multiYearChart"></canvas>
+                </div>
+            </div>
+
+            <div id="multiPredTableContainer" style="margin-top:30px;display:none;">
+                <h3>📋 Detailed Forecast Data</h3>
+                <div class="table-container">
+                    <table id="multiPredTable">
+                        <thead>
+                            <tr>
+                                <th>Academic Year</th>
+                                <th>Semester</th>
+                                <th>SARMAX</th>
+                                <th>Prophet</th>
+                                <th>LSTM</th>
+                                <th>Ensemble Avg</th>
+                                <th>Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="multiPredTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== MODEL DETAILS TAB ===== -->
+    <div id="model-details" class="tab-content">
+        <div class="card">
+            <h2>🤖 Model Architecture & Performance</h2>
+            <p style="color:#718096;margin-bottom:20px;">Detailed information about each forecasting model</p>
+
+            <!-- SARMAX Model -->
+            <div style="margin-bottom:30px;">
+                <h3 style="margin-bottom:15px;color:#667eea;">📊 SARMAX (Seasonal ARIMA) Model</h3>
+                <div class="model-metrics-grid">
+                    <div class="model-card sarmax">
+                        <h4><span class="model-badge sarmax">SARMAX</span></h4>
+                        <div class="metric-item">
+                            <span class="metric-label">Type:</span>
+                            <span class="metric-value">Time Series</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Order (p,d,q):</span>
+                            <span class="metric-value">(1,1,1)</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Seasonal (P,D,Q,s):</span>
+                            <span class="metric-value">(1,1,1,3)</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Seasonality:</span>
+                            <span class="metric-value">3 Semesters/Year</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Confidence Int:</span>
+                            <span class="metric-value">95%</span>
+                        </div>
+                    </div>
+
+                    <div class="model-card sarmax">
+                        <h4>Key Metrics Explained</h4>
+                        <div class="metric-item">
+                            <span class="metric-label">MAE:</span>
+                            <span class="metric-value">Mean Absolute Error</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">RMSE:</span>
+                            <span class="metric-value">Root Mean Squared Error</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">MAPE:</span>
+                            <span class="metric-value">Mean Absolute % Error</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">R²:</span>
+                            <span class="metric-value">Coefficient Determination</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">RMSLE:</span>
+                            <span class="metric-value">Root Mean Squared Log Error</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Theil-U:</span>
+                            <span class="metric-value">Inequality Coefficient</span>
+                        </div>
+                    </div>
+                </div>
+                <p style="margin-top:15px;padding:15px;background:#f0f4ff;border-radius:8px;color:#667eea;font-size:13px;">
+                    <strong>💡 Best For:</strong> Clear seasonal patterns, interpretable coefficients, fast training. 
+                    <strong>Limitation:</strong> Assumes stationarity, struggles with complex non-linear patterns.
+                </p>
+            </div>
+
+            <!-- Facebook Prophet Model -->
+            <div style="margin-bottom:30px;">
+                <h3 style="margin-bottom:15px;color:#f093fb;">📊 Facebook Prophet Model</h3>
+                <div class="model-metrics-grid">
+                    <div class="model-card prophet">
+                        <h4><span class="model-badge prophet">PROPHET</span></h4>
+                        <div class="metric-item">
+                            <span class="metric-label">Type:</span>
+                            <span class="metric-value">Trend + Seasonality</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Yearly Seasonality:</span>
+                            <span class="metric-value">Disabled</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Weekly Seasonality:</span>
+                            <span class="metric-value">Disabled</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Changepoint Detection:</span>
+                            <span class="metric-value">Enabled</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Confidence Int:</span>
+                            <span class="metric-value">95%</span>
+                        </div>
+                    </div>
+
+                    <div class="model-card prophet">
+                        <h4>Strengths & Applications</h4>
+                        <div class="metric-item">
+                            <span class="metric-label">✓ Robust:</span>
+                            <span class="metric-value">Handles missing data</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">✓ Trend Detection:</span>
+                            <span class="metric-value">Auto changepoints</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">✓ Decomposition:</span>
+                            <span class="metric-value">Trend + Seasonality</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">✗ Limitation:</span>
+                            <span class="metric-value">Slower training</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">✗ Limitation:</span>
+                            <span class="metric-value">May underestimate CI</span>
+                        </div>
+                    </div>
+                </div>
+                <p style="margin-top:15px;padding:15px;background:#ffe6f5;border-radius:8px;color:#f093fb;font-size:13px;">
+                    <strong>💡 Best For:</strong> Trend changes, business data, automatic decomposition. 
+                    <strong>Training:</strong> 1-3 seconds per program using Stan sampling.
+                </p>
+            </div>
+
+            <!-- LSTM Model -->
+            <div style="margin-bottom:30px;">
+                <h3 style="margin-bottom:15px;color:#ed8936;">📊 LSTM (Deep Learning) Model</h3>
+                <div class="model-metrics-grid">
+                    <div class="model-card lstm">
+                        <h4><span class="model-badge lstm">LSTM</span></h4>
+                        <div class="metric-item">
+                            <span class="metric-label">Type:</span>
+                            <span class="metric-value">Neural Network</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Architecture:</span>
+                            <span class="metric-value">LSTM + Dense</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">LSTM Units:</span>
+                            <span class="metric-value">32 Cells</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Sequence Length:</span>
+                            <span class="metric-value">4 Timesteps</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Dropout:</span>
+                            <span class="metric-value">20%</span>
+                        </div>
+                    </div>
+
+                    <div class="model-card lstm">
+                        <h4>Deep Learning Features</h4>
+                        <div class="metric-item">
+                            <span class="metric-label">✓ Complex:</span>
+                            <span class="metric-value">Learns dependencies</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">✓ Flexible:</span>
+                            <span class="metric-value">No stationarity needed</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">✓ Powerful:</span>
+                            <span class="metric-value">Non-linear patterns</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">✗ Data Hungry:</span>
+                            <span class="metric-value">Needs 20+ observations</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">✗ Training Time:</span>
+                            <span class="metric-value">10-30 sec/program</span>
+                        </div>
+                    </div>
+                </div>
+                <p style="margin-top:15px;padding:15px;background:#fff5e6;border-radius:8px;color:#ed8936;font-size:13px;">
+                    <strong>💡 Best For:</strong> Complex patterns, large datasets, non-linear relationships. 
+                    <strong>Trade-off:</strong> Less interpretable ("black box"), requires more data.
+                </p>
+            </div>
+
+            <!-- Ensemble Approach -->
+            <div>
+                <h3 style="margin-bottom:15px;color:#2f855a;">📊 Ensemble Average (Recommended)</h3>
+                <div style="background:#f0fdf4;border:2px solid #86efac;border-radius:12px;padding:20px;">
+                    <p style="margin-bottom:15px;">
+                        <strong>🎯 Strategy:</strong> Combines predictions from all three models using simple averaging.
+                    </p>
+                    <p style="margin-bottom:15px;">
+                        <strong>✅ Benefits:</strong>
+                    </p>
+                    <ul style="margin-left:20px;margin-bottom:15px;">
+                        <li>Reduces variance from individual model errors</li>
+                        <li>More robust to model-specific failures</li>
+                        <li>Captures strengths of all approaches</li>
+                        <li>Better generalization than single model</li>
+                    </ul>
+                    <p style="margin-bottom:0;">
+                        <strong>📊 Confidence Scoring:</strong> Average R² from successful models indicates reliability
+                    </p>
+                </div>
             </div>
         </div>
     </div>
@@ -827,14 +1203,15 @@ class EnrollmentTracker{
     constructor(){
         this.charts = {};
         this.predictionChart = null;
+        this.multiYearChart = null;
         this.combinedChart = null;
         this.allEnrollments = [];
         this.allPrograms = [];
         this.allPredictions = [];
+        this.allModelMetrics = [];
         this.editingRecord = null;
-        // sorting state for enrollments table
         this.sortColumn = null;
-        this.sortDirection = 'asc'; // or 'desc'
+        this.sortDirection = 'asc';
         this.init();
     }
 
@@ -868,7 +1245,12 @@ class EnrollmentTracker{
                     this.refreshEnrollmentsTable();
                 }else if(tabId === 'predictions'){
                     document.getElementById('predictionChartContainer').style.display = 'none';
+                    document.getElementById('modelComparisonContainer').style.display = 'none';
+                    document.getElementById('modelMetricsContainer').style.display = 'none';
                     document.getElementById('predictionStatsContainer').style.display = 'none';
+                }else if(tabId === 'multi-predictions'){
+                    document.getElementById('multiPredChartContainer').style.display = 'none';
+                    document.getElementById('multiPredTableContainer').style.display = 'none';
                 }else if(tabId === 'overview'){
                     this.loadAllProgramsCharts();
                     this.refreshCombinedChart();
@@ -879,6 +1261,7 @@ class EnrollmentTracker{
 
     showStatus(msg,type='success',elementId='status'){
         const status=document.getElementById(elementId);
+        if(!status) return;
         status.textContent=msg;
         status.className=`status ${type}`;
         status.style.display='block';
@@ -892,7 +1275,7 @@ class EnrollmentTracker{
 
             this.allPrograms=await res.json();
 
-            const selects=['formProgram','enrollProgramFilter','predProgramFilter'];
+            const selects=['formProgram','enrollProgramFilter','predProgramFilter','multiPredProgramFilter'];
             selects.forEach(selectId => {
                 const select=document.getElementById(selectId);
                 if(select){
@@ -903,6 +1286,8 @@ class EnrollmentTracker{
             });
 
             await this.loadYears();
+            await this.loadPredictions();
+            await this.loadModelMetrics();
             this.loadAllProgramsCharts();
             this.refreshCombinedChart();
 
@@ -930,23 +1315,33 @@ class EnrollmentTracker{
             
             if(enrollYearFilter) enrollYearFilter.innerHTML = '<option value="">All Years</option>' + yearHtml;
 
-            // populate overview year filter
             const overviewYearFilter = document.getElementById('overviewYearFilter');
             if(overviewYearFilter) overviewYearFilter.innerHTML = '<option value="">All Years</option>' + yearHtml;
 
-            // also populate start/end selectors with same year options
-            const overviewYearStart = document.getElementById('overviewYearStart');
-            const overviewYearEnd = document.getElementById('overviewYearEnd');
-            if(overviewYearStart) overviewYearStart.innerHTML = '<option value="">Start Year</option>' + yearHtml;
-            if(overviewYearEnd) overviewYearEnd.innerHTML = '<option value="">End Year</option>' + yearHtml;
-
-            // make the end year default to the latest (first in sorted desc list)
-            if(overviewYearEnd && years.length > 0) {
-                overviewYearEnd.value = years[0];
-            }
-
         }catch(e){
             console.error('Failed to load years:', e);
+        }
+    }
+
+    async loadPredictions(){
+        try{
+            const res = await fetch('api/predictions.php');
+            if(res.ok){
+                this.allPredictions = await res.json();
+            }
+        }catch(e){
+            console.error('Failed to load predictions:', e);
+        }
+    }
+
+    async loadModelMetrics(){
+        try{
+            const res = await fetch('api/model-metrics.php');
+            if(res.ok){
+                this.allModelMetrics = await res.json();
+            }
+        }catch(e){
+            console.error('Failed to load model metrics:', e);
         }
     }
 
@@ -960,17 +1355,14 @@ class EnrollmentTracker{
         document.getElementById('overviewYearFilter')
             .addEventListener('change',()=>this.refreshCombinedChart());
 
-        document.getElementById('overviewYearStart')
-            .addEventListener('change',()=>this.refreshCombinedChart());
-        document.getElementById('overviewYearEnd')
-            .addEventListener('change',()=>this.refreshCombinedChart());
-
         document.getElementById('overviewSemesterFilter')
             .addEventListener('change',()=>this.refreshCombinedChart());
 
         document.getElementById('predProgramFilter')
             .addEventListener('change',()=>{
                 document.getElementById('predictionChartContainer').style.display = 'none';
+                document.getElementById('modelComparisonContainer').style.display = 'none';
+                document.getElementById('modelMetricsContainer').style.display = 'none';
                 document.getElementById('predictionStatsContainer').style.display = 'none';
             });
 
@@ -981,7 +1373,6 @@ class EnrollmentTracker{
                 }
             });
 
-        // Close modal when clicking outside
         window.addEventListener('click', (e) => {
             const modal = document.getElementById('editModal');
             if(e.target === modal){
@@ -1021,19 +1412,6 @@ class EnrollmentTracker{
         });
     }
 
-    // helper to restore original header text if needed
-    getHeaderText(col){
-        switch(col){
-            case 'program': return 'Program';
-            case 'academic_year': return 'Academic Year';
-            case 'semester': return 'Semester';
-            case 'male': return 'Male';
-            case 'female': return 'Female';
-            case 'total': return 'Total';
-            default: return '';
-        }
-    }
-
     updateAvailableYears(){
         const programId = document.getElementById('formProgram').value;
         const yearSelect = document.getElementById('formYear');
@@ -1043,7 +1421,6 @@ class EnrollmentTracker{
             return;
         }
 
-        // Get all existing years for this program
         const existingYears = this.allEnrollments
             .filter(e => e.program_id == programId)
             .filter(e => {
@@ -1054,7 +1431,6 @@ class EnrollmentTracker{
 
         const uniqueExistingYears = new Set(existingYears);
 
-        // Generate available years (next 5 years)
         const currentYear = new Date().getFullYear();
         const availableYears = [];
         
@@ -1077,7 +1453,7 @@ class EnrollmentTracker{
     async refreshCombinedChart(){
         try{
             const yearFilter = document.getElementById('overviewYearFilter').value;
-            const semFilter = document.getElementById('overviewSemesterFilter').value; // '', '1','2','12','3'
+            const semFilter = document.getElementById('overviewSemesterFilter').value;
 
             let filtered = [...this.allEnrollments].filter(e => {
                 const [startYear, endYear] = e.academic_year.split('-').map(y => parseInt(y));
@@ -1088,41 +1464,16 @@ class EnrollmentTracker{
                 filtered = filtered.filter(e => e.academic_year === yearFilter);
             }
 
-            // apply start/end range if selected
-            const startFilter = document.getElementById('overviewYearStart').value;
-            const endFilter = document.getElementById('overviewYearEnd').value;
-            if(startFilter){
-                const startYear = parseInt(startFilter.split('-')[0]);
-                filtered = filtered.filter(e => {
-                    const y = parseInt(e.academic_year.split('-')[0]);
-                    return y >= startYear;
-                });
-            }
-            if(endFilter){
-                const endYear = parseInt(endFilter.split('-')[0]);
-                filtered = filtered.filter(e => {
-                    const y = parseInt(e.academic_year.split('-')[0]);
-                    return y <= endYear;
-                });
-            }
-
             if(semFilter){
                 if(semFilter === '1' || semFilter === '2' || semFilter === '3'){
                     filtered = filtered.filter(e => parseInt(e.semester) === parseInt(semFilter));
-                }else if(semFilter === '12'){
-                    filtered = filtered.filter(e => parseInt(e.semester) === 1 || parseInt(e.semester) === 2);
                 }
             }
 
-            // determine grouping strategy
-            // when user requests all semesters (semFilter === '') or semFilter === '12',
-            // show individual points per semester instead of rolling them up by year
             const aggregate = {};
             filtered.forEach(e => {
-                // grouping key: either year alone or year+semester
                 let key = e.academic_year;
-                if(!semFilter || semFilter === '12'){
-                    // include semester in label; this covers both "all" and "1&2" filters
+                if(!semFilter){
                     key = `${e.academic_year} S${e.semester}`;
                 }
 
@@ -1135,7 +1486,6 @@ class EnrollmentTracker{
             });
 
             const chartData = Object.keys(aggregate).map(key => {
-                // if key includes semester information split it back out for labeling
                 let academic_year = key;
                 let semester = null;
                 if(key.includes(' S')){
@@ -1164,7 +1514,6 @@ class EnrollmentTracker{
         }
         if(container) container.style.display = 'block';
 
-        // sort by academic year, then semester if available
         chartData.sort((a,b)=>{
             const yearA=parseInt(a.academic_year.split('-')[0]);
             const yearB=parseInt(b.academic_year.split('-')[0]);
@@ -1276,16 +1625,8 @@ class EnrollmentTracker{
             
             const allData = await res.json();
 
-            // Fetch predictions
-            const predRes = await fetch('api/predictions.php');
-            if(predRes.ok){
-                this.allPredictions = await predRes.json();
-            }
-
-            // Calculate summary
             this.renderSummary(allData);
 
-            // Create charts for each program
             const grid = document.getElementById('programsChartsGrid');
             grid.innerHTML = '';
 
@@ -1297,7 +1638,6 @@ class EnrollmentTracker{
 
                 if(programData.length === 0) continue;
 
-                // Create card for this program
                 const card = document.createElement('div');
                 card.className = 'program-chart-card';
                 
@@ -1319,7 +1659,6 @@ class EnrollmentTracker{
 
                 grid.appendChild(card);
 
-                // Create chart
                 setTimeout(() => {
                     this.createProgramChart(programId, programData);
                 }, 100);
@@ -1493,7 +1832,6 @@ class EnrollmentTracker{
 
             const semesterMap = {1:'First',2:'Second',3:'Summer'};
 
-            // apply sorting if requested
             if(this.sortColumn){
                 filtered.sort((a,b)=>{
                     let valA, valB;
@@ -1717,7 +2055,6 @@ class EnrollmentTracker{
                 return;
             }
 
-            // Get all enrollment data for this program
             const allData = this.allEnrollments.filter(e => {
                 const [startYear, endYear] = e.academic_year.split('-').map(y => parseInt(y));
                 return (endYear - startYear) === 1 && e.program_id == programFilter;
@@ -1728,13 +2065,12 @@ class EnrollmentTracker{
                 return;
             }
 
-            // Get predictions for this program
             const predictions = this.allPredictions.filter(p => p.program_id == programFilter);
+            const metrics = this.allModelMetrics.filter(m => m.program_id == programFilter);
 
-            // Create chart with historical data + prediction
             this.createPredictionChart(programFilter, allData, predictions);
-
-            // Show stats
+            this.displayModelComparison(programFilter, predictions, metrics);
+            this.displayModelMetrics(metrics);
             this.displayPredictionStats(predictions);
 
         }catch(e){
@@ -1754,7 +2090,6 @@ class EnrollmentTracker{
         const males = historicalData.map(e=>e.male||0);
         const females = historicalData.map(e=>e.female||0);
 
-        // Add prediction data
         let allLabels = [...labels];
         let allTotals = [...totals];
         let allMales = [...males];
@@ -1853,6 +2188,129 @@ class EnrollmentTracker{
         document.getElementById('predictionChartContainer').style.display = 'block';
     }
 
+    displayModelComparison(programId, predictions, metrics){
+        const container = document.getElementById('modelComparisonContainer');
+        const grid = document.getElementById('modelComparisonGrid');
+
+        if(predictions.length === 0){
+            grid.innerHTML = '<div class="text-center" style="grid-column:1/-1;">No predictions available</div>';
+            container.style.display = 'block';
+            return;
+        }
+
+        // Group predictions by model
+        const modelPredictions = {
+            sarmax: predictions.find(p => p.model_name === 'SARMAX')?.predicted_total,
+            prophet: predictions.find(p => p.model_name === 'Prophet')?.predicted_total,
+            lstm: predictions.find(p => p.model_name === 'LSTM')?.predicted_total,
+            ensemble: predictions.find(p => p.model_name === 'Ensemble')?.predicted_total
+        };
+
+        const semesterMap = {1:'First',2:'Second',3:'Summer'};
+        const firstPred = predictions[0];
+
+        grid.innerHTML = `
+            <div class="prediction-comparison-card">
+                <h4>📊 SARMAX Model</h4>
+                <div class="prediction-row">
+                    <span class="prediction-row-label">Prediction (${firstPred.academic_year})</span>
+                    <span class="prediction-row-value">${modelPredictions.sarmax || '—'} students</span>
+                </div>
+            </div>
+
+            <div class="prediction-comparison-card">
+                <h4>📊 Prophet Model</h4>
+                <div class="prediction-row">
+                    <span class="prediction-row-label">Prediction (${firstPred.academic_year})</span>
+                    <span class="prediction-row-value">${modelPredictions.prophet || '—'} students</span>
+                </div>
+            </div>
+
+            <div class="prediction-comparison-card">
+                <h4>📊 LSTM Model</h4>
+                <div class="prediction-row">
+                    <span class="prediction-row-label">Prediction (${firstPred.academic_year})</span>
+                    <span class="prediction-row-value">${modelPredictions.lstm || '—'} students</span>
+                </div>
+            </div>
+
+            <div class="prediction-comparison-card" style="background:linear-gradient(135deg,#2f855a 0%,#22543d 100%);">
+                <h4>✨ Ensemble Average</h4>
+                <div class="prediction-row">
+                    <span class="prediction-row-label">Consensus Prediction</span>
+                    <span class="prediction-row-value">${modelPredictions.ensemble || '—'} students</span>
+                </div>
+                <div class="prediction-row">
+                    <span class="prediction-row-label">Confidence</span>
+                    <span class="prediction-row-value">${(firstPred.confidence * 100).toFixed(0)}%</span>
+                </div>
+            </div>
+        `;
+
+        container.style.display = 'block';
+    }
+
+    displayModelMetrics(metrics){
+        const container = document.getElementById('modelMetricsContainer');
+        const grid = document.getElementById('modelMetricsGrid');
+
+        if(metrics.length === 0){
+            grid.innerHTML = '<div class="text-center" style="grid-column:1/-1;">No metrics available</div>';
+            container.style.display = 'block';
+            return;
+        }
+
+        // Group metrics by model
+        const sarmaxMetrics = metrics.filter(m => m.model_name === 'SARMAX');
+        const prophetMetrics = metrics.filter(m => m.model_name === 'Prophet');
+        const lstmMetrics = metrics.filter(m => m.model_name === 'LSTM');
+
+        const createMetricsCard = (modelName, modelMetrics, modelClass) => {
+            const metricsMap = {};
+            modelMetrics.forEach(m => {
+                metricsMap[m.metric_name] = m.metric_value;
+            });
+
+            return `
+                <div class="model-card ${modelClass}">
+                    <h4><span class="model-badge ${modelClass}">${modelName}</span></h4>
+                    <div class="metric-item">
+                        <span class="metric-label">MAE:</span>
+                        <span class="metric-value">${metricsMap['MAE'] || '—'}</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">RMSE:</span>
+                        <span class="metric-value">${metricsMap['RMSE'] || '—'}</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">MAPE:</span>
+                        <span class="metric-value">${metricsMap['MAPE'] || '—'}%</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">R²:</span>
+                        <span class="metric-value">${metricsMap['R²'] || '—'}</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">RMSLE:</span>
+                        <span class="metric-value">${metricsMap['RMSLE'] || '—'}</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Theil-U:</span>
+                        <span class="metric-value">${metricsMap['Theil_U'] || '—'}</span>
+                    </div>
+                </div>
+            `;
+        };
+
+        grid.innerHTML = `
+            ${createMetricsCard('SARMAX', sarmaxMetrics, 'sarmax')}
+            ${createMetricsCard('Prophet', prophetMetrics, 'prophet')}
+            ${createMetricsCard('LSTM', lstmMetrics, 'lstm')}
+        `;
+
+        container.style.display = 'block';
+    }
+
     displayPredictionStats(predictions){
         const container = document.getElementById('predictionStatsContainer');
         const grid = document.getElementById('predictionsGrid');
@@ -1872,14 +2330,10 @@ class EnrollmentTracker{
 
         grid.innerHTML = predictions.map(p => `
             <div class="prediction-card">
-                <h4>${programMap[p.program_id] || p.program_id}</h4>
+                <h4>📊 ${semesterMap[p.semester] || p.semester}</h4>
                 <div class="prediction-item">
                     <span class="prediction-label">Academic Year</span>
                     <span class="prediction-value">${p.academic_year}</span>
-                </div>
-                <div class="prediction-item">
-                    <span class="prediction-label">Semester</span>
-                    <span class="prediction-value">${semesterMap[p.semester] || p.semester}</span>
                 </div>
                 <div class="prediction-item">
                     <span class="prediction-label">Predicted Total</span>
@@ -1893,10 +2347,217 @@ class EnrollmentTracker{
                     <span class="prediction-label">Confidence</span>
                     <span class="prediction-value">${(p.confidence * 100).toFixed(0)}%</span>
                 </div>
+                <div class="prediction-item">
+                    <span class="prediction-label">Model Ensemble</span>
+                    <span class="prediction-value" style="font-size:11px;">${p.model_ensemble || 'SARMAX+Prophet+LSTM'}</span>
+                </div>
             </div>
         `).join('');
 
         container.style.display = 'block';
+    }
+
+    async loadMultiYearPredictions(){
+        try{
+            const programId = document.getElementById('multiPredProgramFilter').value;
+            const yearsAhead = document.getElementById('multiPredYearsFilter').value;
+
+            if(!programId){
+                this.showStatus('Please select a program','error');
+                return;
+            }
+
+            const predictions = this.allPredictions.filter(p => 
+                p.program_id == programId && 
+                this.isInForecastRange(p.academic_year, yearsAhead)
+            );
+
+            if(predictions.length === 0){
+                this.showStatus('No predictions available for selected range','error');
+                return;
+            }
+
+            this.createMultiYearChart(programId, predictions);
+            this.displayMultiYearTable(predictions);
+
+        }catch(e){
+            this.showStatus('Error loading multi-year predictions: '+e.message,'error');
+        }
+    }
+
+    isInForecastRange(academicYear, yearsAhead){
+        const [startYear] = academicYear.split('-').map(y => parseInt(y));
+        const baseYear = 2026;
+        const maxYear = baseYear + parseInt(yearsAhead) - 1;
+        return startYear >= baseYear && startYear <= maxYear;
+    }
+
+    createMultiYearChart(programId, predictions){
+        predictions.sort((a,b)=>{
+            const yearA = parseInt(a.academic_year.split('-')[0]);
+            const yearB = parseInt(b.academic_year.split('-')[0]);
+            return yearA - yearB || a.semester - b.semester;
+        });
+
+        const labels = predictions.map(p => `${p.academic_year} S${p.semester}`);
+        const ensemble = predictions.map(p => p.predicted_total);
+        const males = predictions.map(p => p.predicted_male || 0);
+        const females = predictions.map(p => p.predicted_female || 0);
+
+        const ctx = document.getElementById('multiYearChart');
+        if(!ctx) return;
+
+        if(this.multiYearChart){
+            this.multiYearChart.destroy();
+        }
+
+        const programName = programNames[programId] || `Program ${programId}`;
+        
+        this.multiYearChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Ensemble Forecast',
+                        data: ensemble,
+                        borderColor: '#2f855a',
+                        backgroundColor: 'rgba(47, 133, 90, 0.15)',
+                        borderWidth: 4,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 8,
+                        pointBackgroundColor: '#2f855a',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    },
+                    {
+                        label: 'Male Students',
+                        data: males,
+                        borderColor: '#2b6cb0',
+                        backgroundColor: 'rgba(43, 108, 176, 0.05)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#2b6cb0'
+                    },
+                    {
+                        label: 'Female Students',
+                        data: females,
+                        borderColor: '#d53f8c',
+                        backgroundColor: 'rgba(213, 63, 140, 0.05)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#d53f8c'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    datalabels: {
+                        display: true,
+                        font: {weight: 'bold', size: 12},
+                        color: '#2d3748',
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        borderRadius: 4,
+                        padding: 6,
+                        anchor: 'end',
+                        align: 'top'
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value){
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        document.getElementById('multiPredChartContainer').style.display = 'block';
+    }
+
+    displayMultiYearTable(predictions){
+        const tbody = document.getElementById('multiPredTableBody');
+
+        if(predictions.length === 0){
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center">No data</td></tr>';
+            document.getElementById('multiPredTableContainer').style.display = 'block';
+            return;
+        }
+
+        // Group by year for better visibility
+        predictions.sort((a,b)=>{
+            const yearA = parseInt(a.academic_year.split('-')[0]);
+            const yearB = parseInt(b.academic_year.split('-')[0]);
+            return yearA - yearB || a.semester - b.semester;
+        });
+
+        tbody.innerHTML = predictions.map(p => `
+            <tr>
+                <td><strong>${p.academic_year}</strong></td>
+                <td>Semester ${p.semester}</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td><strong>${p.predicted_total}</strong></td>
+                <td>${(p.confidence * 100).toFixed(0)}%</td>
+            </tr>
+        `).join('');
+
+        document.getElementById('multiPredTableContainer').style.display = 'block';
+    }
+
+    downloadForecastCSV(){
+        const programId = document.getElementById('multiPredProgramFilter').value;
+        const yearsAhead = document.getElementById('multiPredYearsFilter').value;
+
+        if(!programId){
+            this.showStatus('Please select a program','error');
+            return;
+        }
+
+        const predictions = this.allPredictions.filter(p => 
+            p.program_id == programId && 
+            this.isInForecastRange(p.academic_year, yearsAhead)
+        );
+
+        if(predictions.length === 0){
+            this.showStatus('No data to export','error');
+            return;
+        }
+
+        let csv = 'Academic Year,Semester,Program,Predicted Total,Male,Female,Confidence\n';
+        
+        const programMap = {};
+        this.allPrograms.forEach(p => {
+            programMap[p.id] = p.name;
+        });
+
+        predictions.forEach(p => {
+            csv += `${p.academic_year},${p.semester},${programMap[p.program_id]},${p.predicted_total},${p.predicted_male},${p.predicted_female},${(p.confidence*100).toFixed(0)}%\n`;
+        });
+
+        const blob = new Blob([csv], {type: 'text/csv'});
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `predictions-${programId}-${yearsAhead}years.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
     }
 }
 
@@ -1911,55 +2572,6 @@ document.getElementById('loginForm')?.addEventListener('submit',e=>{
 if(window.location.search.includes('login=1')){
     var tracker = new EnrollmentTracker();
 }
-</script>
-
-<script>
-// Time-based header banner update with image-extension fallback and logging
-function updateHeaderBanner(){
-    const el = document.querySelector('.header-banner');
-    if(!el) return;
-
-    const now = new Date();
-    const h = now.getHours();
-
-    let period = 'night';
-    if(h >= 6 && h < 12) period = 'day';
-    else if(h >= 12 && h < 18) period = 'afternoon';
-
-    el.classList.remove('day','afternoon','night');
-    el.classList.add(period);
-
-    // IMPORTANT — change this to your project path
-    const basePath = '/enrollment-tracker/assets/';
-
-    const nameMap = { day:'day_v1', afternoon:'afternoon_v1', night:'night_v1' };
-
-    const candidates = [
-        basePath + nameMap[period] + '.png',
-        basePath + nameMap[period] + '.jpg',
-        basePath + nameMap[period] + '.webp'
-    ];
-
-    function tryLoad(idx){
-        if(idx >= candidates.length){
-            console.warn('Header banner: no image found');
-            return;
-        }
-
-        const img = new Image();
-        img.onload = ()=> el.style.backgroundImage = `url('${candidates[idx]}')`;
-        img.onerror = ()=> tryLoad(idx+1);
-        img.src = candidates[idx];
-    }
-
-    el.style.backgroundImage = '';
-    tryLoad(0);
-}
-
-document.addEventListener('DOMContentLoaded', ()=>{
-    updateHeaderBanner();
-    setInterval(updateHeaderBanner, 60000);
-});
 </script>
 
 </body>

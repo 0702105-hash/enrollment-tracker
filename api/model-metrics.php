@@ -4,7 +4,7 @@ require_once 'config.php';
 try {
     $program_id = $_GET['program_id'] ?? null;
     
-    $query = "SELECT * FROM predictions WHERE 1=1";
+    $query = "SELECT * FROM model_metrics WHERE 1=1";
     $params = [];
     
     if ($program_id) {
@@ -12,15 +12,15 @@ try {
         $params[] = $program_id;
     }
     
-    $query .= " ORDER BY program_id, academic_year, semester";
+    $query .= " ORDER BY program_id, model_name, metric_name";
     
     $stmt = $pdo->prepare($query);
     $stmt->execute($params);
     
-    $predictions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $metrics = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     header('Content-Type: application/json');
-    echo json_encode($predictions);
+    echo json_encode($metrics);
     
 } catch(Exception $e) {
     header('Content-Type: application/json');
