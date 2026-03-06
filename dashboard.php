@@ -32,6 +32,27 @@ body{
     padding:30px;
     border-radius:18px;
     margin-bottom:25px;
+    position:relative;
+    background-size:cover;
+    background-position:center center;
+    transition:background-image 400ms ease-in-out, background-color 400ms ease-in-out;
+    overflow:hidden;
+}
+
+.header-banner::before{
+    /* subtle dark overlay so text remains readable on images */
+    content:'';
+    position:absolute;
+    left:0;right:0;top:0;bottom:0;
+    background:linear-gradient(180deg,rgba(0,0,0,0.18),rgba(0,0,0,0.18));
+    pointer-events:none;
+    border-radius:18px;
+}
+
+.header-banner h1,
+.header-banner p{
+    position:relative; /* above overlay */
+    z-index:1;
 }
 
 .header-banner h1{
@@ -41,8 +62,21 @@ body{
 }
 
 .header-banner p{
-    opacity:.9;
+    opacity:.95;
     font-size:14px;
+}
+
+/* Time-of-day background classes. These reference files in the workspace `assets/` folder.
+   Update filenames/extensions if your assets use different names. Fallback keeps the
+   original gradient if images are missing. */
+.header-banner.day{
+    background-image: url('assets/day_v1.png');
+}
+.header-banner.afternoon{
+    background-image: url('assets/afternoon_v1.png');
+}
+.header-banner.night{
+    background-image: url('assets/night_v1.png');
 }
 
 /* ===== NOTICE ===== */
@@ -292,6 +326,16 @@ th,td{
 th{
     font-weight:600;
     color:#2d3748;
+}
+
+/* sortable table headers */
+th.sortable{
+    cursor:pointer;
+}
+th.sortable .sort-indicator{
+    margin-left:4px;
+    font-size:0.8em;
+    opacity:0.6;
 }
 
 tbody tr:hover{
@@ -544,6 +588,45 @@ tbody tr:hover{
         <!-- SUMMARY -->
         <div class="summary-grid" id="summaryGrid"></div>
 
+        <!-- COMBINED ALL PROGRAMS CHART -->
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
+                <h2>📊 All Programs Combined Enrollment Trend</h2>
+                <div class="select-container" style="margin:0;">
+                    <select id="overviewYearFilter" style="flex:1;max-width:180px;">
+                        <option value="">All Years</option>
+                    </select>
+                    <select id="overviewYearStart" style="flex:1;max-width:180px;">
+                        <option value="">Start Year</option>
+                        <option value="2015-2016">2015-2016</option>
+                        <option value="2016-2017">2016-2017</option>
+                        <option value="2017-2018">2017-2018</option>
+                        <option value="2018-2019">2018-2019</option>
+                        <option value="2019-2020">2019-2020</option>
+                    </select>
+                    <select id="overviewYearEnd" style="flex:1;max-width:180px;">
+                        <option value="">End Year</option>
+                        <option value="2015-2016">2015-2016</option>
+                        <option value="2016-2017">2016-2017</option>
+                        <option value="2017-2018">2017-2018</option>
+                        <option value="2018-2019">2018-2019</option>
+                        <option value="2019-2020">2019-2020</option>
+                    </select>
+                    <select id="overviewSemesterFilter" style="flex:1;max-width:160px;">
+                        <option value="">All Semesters</option>
+                        <option value="1">Semester 1</option>
+                        <option value="2">Semester 2</option>
+                        <option value="12">Semester 1 &amp; 2</option>
+                        <option value="3">Semester 3</option>
+                    </select>
+                    <button onclick="tracker.refreshCombinedChart()" style="margin:0;">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="chart-container" style="height:400px;">
+                <canvas id="combinedChart"></canvas>
+            </div>
+        </div>
+
         <!-- ALL PROGRAMS CHARTS -->
         <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
@@ -578,12 +661,12 @@ tbody tr:hover{
                 <table>
                     <thead>
                         <tr>
-                            <th>Program</th>
-                            <th>Academic Year</th>
-                            <th>Semester</th>
-                            <th>Male</th>
-                            <th>Female</th>
-                            <th>Total</th>
+                            <th class="sortable" data-sort="program">Program <span class="sort-indicator"></span></th>
+                            <th class="sortable" data-sort="academic_year">Academic Year <span class="sort-indicator"></span></th>
+                            <th class="sortable" data-sort="semester">Semester <span class="sort-indicator"></span></th>
+                            <th class="sortable" data-sort="male">Male <span class="sort-indicator"></span></th>
+                            <th class="sortable" data-sort="female">Female <span class="sort-indicator"></span></th>
+                            <th class="sortable" data-sort="total">Total <span class="sort-indicator"></span></th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -744,10 +827,14 @@ class EnrollmentTracker{
     constructor(){
         this.charts = {};
         this.predictionChart = null;
+        this.combinedChart = null;
         this.allEnrollments = [];
         this.allPrograms = [];
         this.allPredictions = [];
         this.editingRecord = null;
+        // sorting state for enrollments table
+        this.sortColumn = null;
+        this.sortDirection = 'asc'; // or 'desc'
         this.init();
     }
 
@@ -758,6 +845,7 @@ class EnrollmentTracker{
             this.setupTabs();
             this.loadPrograms();
             this.bindEvents();
+            this.setupEnrollmentsSorting();
         });
 <?php endif; ?>
     }
@@ -783,6 +871,7 @@ class EnrollmentTracker{
                     document.getElementById('predictionStatsContainer').style.display = 'none';
                 }else if(tabId === 'overview'){
                     this.loadAllProgramsCharts();
+                    this.refreshCombinedChart();
                 }
             });
         });
@@ -815,6 +904,7 @@ class EnrollmentTracker{
 
             await this.loadYears();
             this.loadAllProgramsCharts();
+            this.refreshCombinedChart();
 
         }catch(e){
             this.showStatus('Failed to load programs: '+e.message,'error');
@@ -840,6 +930,21 @@ class EnrollmentTracker{
             
             if(enrollYearFilter) enrollYearFilter.innerHTML = '<option value="">All Years</option>' + yearHtml;
 
+            // populate overview year filter
+            const overviewYearFilter = document.getElementById('overviewYearFilter');
+            if(overviewYearFilter) overviewYearFilter.innerHTML = '<option value="">All Years</option>' + yearHtml;
+
+            // also populate start/end selectors with same year options
+            const overviewYearStart = document.getElementById('overviewYearStart');
+            const overviewYearEnd = document.getElementById('overviewYearEnd');
+            if(overviewYearStart) overviewYearStart.innerHTML = '<option value="">Start Year</option>' + yearHtml;
+            if(overviewYearEnd) overviewYearEnd.innerHTML = '<option value="">End Year</option>' + yearHtml;
+
+            // make the end year default to the latest (first in sorted desc list)
+            if(overviewYearEnd && years.length > 0) {
+                overviewYearEnd.value = years[0];
+            }
+
         }catch(e){
             console.error('Failed to load years:', e);
         }
@@ -851,6 +956,17 @@ class EnrollmentTracker{
 
         document.getElementById('enrollYearFilter')
             .addEventListener('change',()=>this.refreshEnrollmentsTable());
+
+        document.getElementById('overviewYearFilter')
+            .addEventListener('change',()=>this.refreshCombinedChart());
+
+        document.getElementById('overviewYearStart')
+            .addEventListener('change',()=>this.refreshCombinedChart());
+        document.getElementById('overviewYearEnd')
+            .addEventListener('change',()=>this.refreshCombinedChart());
+
+        document.getElementById('overviewSemesterFilter')
+            .addEventListener('change',()=>this.refreshCombinedChart());
 
         document.getElementById('predProgramFilter')
             .addEventListener('change',()=>{
@@ -872,6 +988,50 @@ class EnrollmentTracker{
                 this.closeEditModal();
             }
         });
+    }
+
+    setupEnrollmentsSorting(){
+        const headers = document.querySelectorAll('#enrollments th.sortable');
+        headers.forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.getAttribute('data-sort');
+                if(this.sortColumn === col){
+                    this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.sortColumn = col;
+                    this.sortDirection = 'asc';
+                }
+                this.updateSortIndicators();
+                this.refreshEnrollmentsTable();
+            });
+        });
+    }
+
+    updateSortIndicators(){
+        const headers = document.querySelectorAll('#enrollments th.sortable');
+        headers.forEach(th=>{
+            const col = th.getAttribute('data-sort');
+            const indicator = th.querySelector('.sort-indicator');
+            if(!indicator) return;
+            if(this.sortColumn === col){
+                indicator.textContent = this.sortDirection === 'asc' ? '▲' : '▼';
+            } else {
+                indicator.textContent = '';
+            }
+        });
+    }
+
+    // helper to restore original header text if needed
+    getHeaderText(col){
+        switch(col){
+            case 'program': return 'Program';
+            case 'academic_year': return 'Academic Year';
+            case 'semester': return 'Semester';
+            case 'male': return 'Male';
+            case 'female': return 'Female';
+            case 'total': return 'Total';
+            default: return '';
+        }
     }
 
     updateAvailableYears(){
@@ -912,6 +1072,199 @@ class EnrollmentTracker{
 
         yearSelect.innerHTML = '<option value="">Select academic year</option>' +
             availableYears.map(y => `<option value="${y}">${y}</option>`).join('');
+    }
+
+    async refreshCombinedChart(){
+        try{
+            const yearFilter = document.getElementById('overviewYearFilter').value;
+            const semFilter = document.getElementById('overviewSemesterFilter').value; // '', '1','2','12','3'
+
+            let filtered = [...this.allEnrollments].filter(e => {
+                const [startYear, endYear] = e.academic_year.split('-').map(y => parseInt(y));
+                return (endYear - startYear) === 1;
+            });
+
+            if(yearFilter){
+                filtered = filtered.filter(e => e.academic_year === yearFilter);
+            }
+
+            // apply start/end range if selected
+            const startFilter = document.getElementById('overviewYearStart').value;
+            const endFilter = document.getElementById('overviewYearEnd').value;
+            if(startFilter){
+                const startYear = parseInt(startFilter.split('-')[0]);
+                filtered = filtered.filter(e => {
+                    const y = parseInt(e.academic_year.split('-')[0]);
+                    return y >= startYear;
+                });
+            }
+            if(endFilter){
+                const endYear = parseInt(endFilter.split('-')[0]);
+                filtered = filtered.filter(e => {
+                    const y = parseInt(e.academic_year.split('-')[0]);
+                    return y <= endYear;
+                });
+            }
+
+            if(semFilter){
+                if(semFilter === '1' || semFilter === '2' || semFilter === '3'){
+                    filtered = filtered.filter(e => parseInt(e.semester) === parseInt(semFilter));
+                }else if(semFilter === '12'){
+                    filtered = filtered.filter(e => parseInt(e.semester) === 1 || parseInt(e.semester) === 2);
+                }
+            }
+
+            // determine grouping strategy
+            // when user requests all semesters (semFilter === '') or semFilter === '12',
+            // show individual points per semester instead of rolling them up by year
+            const aggregate = {};
+            filtered.forEach(e => {
+                // grouping key: either year alone or year+semester
+                let key = e.academic_year;
+                if(!semFilter || semFilter === '12'){
+                    // include semester in label; this covers both "all" and "1&2" filters
+                    key = `${e.academic_year} S${e.semester}`;
+                }
+
+                if(!aggregate[key]){
+                    aggregate[key] = { total:0, male:0, female:0 };
+                }
+                aggregate[key].male += parseInt(e.male)||0;
+                aggregate[key].female += parseInt(e.female)||0;
+                aggregate[key].total += (parseInt(e.male)||0) + (parseInt(e.female)||0);
+            });
+
+            const chartData = Object.keys(aggregate).map(key => {
+                // if key includes semester information split it back out for labeling
+                let academic_year = key;
+                let semester = null;
+                if(key.includes(' S')){
+                    const parts = key.split(' S');
+                    academic_year = parts[0];
+                    semester = parts[1];
+                }
+                return {
+                    academic_year,
+                    semester,
+                    ...aggregate[key]
+                };
+            });
+
+            this.createCombinedChart(chartData);
+        }catch(e){
+            this.showStatus('Error loading combined chart: '+e.message,'error');
+        }
+    }
+
+    createCombinedChart(chartData){
+        const container = document.getElementById('combinedChart').closest('.chart-container');
+        if(chartData.length === 0){
+            if(container) container.style.display = 'none';
+            return;
+        }
+        if(container) container.style.display = 'block';
+
+        // sort by academic year, then semester if available
+        chartData.sort((a,b)=>{
+            const yearA=parseInt(a.academic_year.split('-')[0]);
+            const yearB=parseInt(b.academic_year.split('-')[0]);
+            if(yearA !== yearB) return yearA - yearB;
+            if(a.semester != null && b.semester != null){
+                return a.semester - b.semester;
+            }
+            return 0;
+        });
+
+        const labels = chartData.map(e=>{
+            if(e.semester != null){
+                return `${e.academic_year} S${e.semester}`;
+            }
+            return `${e.academic_year}`;
+        });
+        const totals = chartData.map(e=>e.total||0);
+        const males = chartData.map(e=>e.male||0);
+        const females = chartData.map(e=>e.female||0);
+
+        const ctx = document.getElementById('combinedChart');
+        if(!ctx) return;
+
+        if(this.combinedChart){
+            this.combinedChart.destroy();
+        }
+
+        this.combinedChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Total Enrollment',
+                        data: totals,
+                        borderColor: '#ed8936',
+                        backgroundColor: 'rgba(237, 137, 54, 0.15)',
+                        borderWidth: 4,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 8,
+                        pointBackgroundColor: '#ed8936',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    },
+                    {
+                        label: 'Male Students',
+                        data: males,
+                        borderColor: '#2b6cb0',
+                        backgroundColor: 'rgba(43, 108, 176, 0.05)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#2b6cb0'
+                    },
+                    {
+                        label: 'Female Students',
+                        data: females,
+                        borderColor: '#d53f8c',
+                        backgroundColor: 'rgba(213, 63, 140, 0.05)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#d53f8c'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    datalabels: {
+                        display: true,
+                        font: {weight: 'bold', size: 12},
+                        color: '#2d3748',
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        borderRadius: 4,
+                        padding: 6,
+                        anchor: 'end',
+                        align: 'top'
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value){
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
 
     async loadAllProgramsCharts(){
@@ -1139,6 +1492,45 @@ class EnrollmentTracker{
             });
 
             const semesterMap = {1:'First',2:'Second',3:'Summer'};
+
+            // apply sorting if requested
+            if(this.sortColumn){
+                filtered.sort((a,b)=>{
+                    let valA, valB;
+                    switch(this.sortColumn){
+                        case 'program':
+                            valA = programMap[a.program_id] || a.program_id;
+                            valB = programMap[b.program_id] || b.program_id;
+                            break;
+                        case 'academic_year':
+                            valA = a.academic_year;
+                            valB = b.academic_year;
+                            break;
+                        case 'semester':
+                            valA = a.semester;
+                            valB = b.semester;
+                            break;
+                        case 'male':
+                            valA = parseInt(a.male) || 0;
+                            valB = parseInt(b.male) || 0;
+                            break;
+                        case 'female':
+                            valA = parseInt(a.female) || 0;
+                            valB = parseInt(b.female) || 0;
+                            break;
+                        case 'total':
+                            valA = (parseInt(a.male)||0) + (parseInt(a.female)||0);
+                            valB = (parseInt(b.male)||0) + (parseInt(b.female)||0);
+                            break;
+                        default:
+                            valA = '';
+                            valB = '';
+                    }
+                    if(valA < valB) return this.sortDirection === 'asc' ? -1 : 1;
+                    if(valA > valB) return this.sortDirection === 'asc' ? 1 : -1;
+                    return 0;
+                });
+            }
 
             tbody.innerHTML = filtered.map(e => `
                 <tr>
@@ -1519,6 +1911,55 @@ document.getElementById('loginForm')?.addEventListener('submit',e=>{
 if(window.location.search.includes('login=1')){
     var tracker = new EnrollmentTracker();
 }
+</script>
+
+<script>
+// Time-based header banner update with image-extension fallback and logging
+function updateHeaderBanner(){
+    const el = document.querySelector('.header-banner');
+    if(!el) return;
+
+    const now = new Date();
+    const h = now.getHours();
+
+    let period = 'night';
+    if(h >= 6 && h < 12) period = 'day';
+    else if(h >= 12 && h < 18) period = 'afternoon';
+
+    el.classList.remove('day','afternoon','night');
+    el.classList.add(period);
+
+    // IMPORTANT — change this to your project path
+    const basePath = '/enrollment-tracker/assets/';
+
+    const nameMap = { day:'day_v1', afternoon:'afternoon_v1', night:'night_v1' };
+
+    const candidates = [
+        basePath + nameMap[period] + '.png',
+        basePath + nameMap[period] + '.jpg',
+        basePath + nameMap[period] + '.webp'
+    ];
+
+    function tryLoad(idx){
+        if(idx >= candidates.length){
+            console.warn('Header banner: no image found');
+            return;
+        }
+
+        const img = new Image();
+        img.onload = ()=> el.style.backgroundImage = `url('${candidates[idx]}')`;
+        img.onerror = ()=> tryLoad(idx+1);
+        img.src = candidates[idx];
+    }
+
+    el.style.backgroundImage = '';
+    tryLoad(0);
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+    updateHeaderBanner();
+    setInterval(updateHeaderBanner, 60000);
+});
 </script>
 
 </body>
