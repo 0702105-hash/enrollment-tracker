@@ -1,4 +1,3 @@
-// Program names mapping
 const programNames = {
     1: 'BA Communication',
     2: 'BA English',
@@ -21,8 +20,7 @@ let allPredictions = [];
 let trendChart = null;
 let genderChart = null;
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     initializeNavigation();
     updateTimestamp();
     setInterval(updateTimestamp, 1000);
@@ -30,7 +28,6 @@ document.addEventListener('DOMContentLoaded', function() {
     populateSelectOptions();
 });
 
-// ========== NAVIGATION ==========
 function initializeNavigation() {
     const navItems = document.querySelectorAll('.nav-item');
     const tabContents = document.querySelectorAll('.tab-content');
@@ -40,15 +37,12 @@ function initializeNavigation() {
             e.preventDefault();
             const tabId = item.getAttribute('data-tab');
 
-            // Remove active class from all
             navItems.forEach(n => n.classList.remove('active'));
             tabContents.forEach(t => t.classList.remove('active'));
 
-            // Add active class to clicked
             item.classList.add('active');
             document.getElementById(tabId).classList.add('active');
 
-            // Update page title
             const titles = {
                 'overview': '📊 Dashboard Overview',
                 'enrollments': '👥 Enrollment Records',
@@ -57,7 +51,6 @@ function initializeNavigation() {
             };
             document.getElementById('page-title').textContent = titles[tabId];
 
-            // Load data if needed
             if (tabId === 'enrollments') refreshEnrollments();
             if (tabId === 'predictions') refreshPredictions();
             if (tabId === 'overview') loadDashboardData();
@@ -67,22 +60,31 @@ function initializeNavigation() {
 
 function updateTimestamp() {
     const now = new Date();
-    const options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
-    document.getElementById('timestamp').textContent = now.toLocaleDateString('en-US', options);
+    const options = {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    };
+    const el = document.getElementById('timestamp');
+    if (el) {
+        el.textContent = now.toLocaleDateString('en-US', options);
+    }
 }
 
-// ========== DATA LOADING ==========
 async function loadDashboardData() {
     try {
-        // Load enrollments
         const enrollRes = await fetch('api/enrollments.php');
-        allEnrollments = await enrollRes.json();
-
-        // Load predictions
         const predRes = await fetch('api/predictions.php');
-        allPredictions = await predRes.json();
 
-        // Update stats
+        const enrollData = await enrollRes.json();
+        const predData = await predRes.json();
+
+        allEnrollments = Array.isArray(enrollData) ? enrollData : [];
+        allPredictions = Array.isArray(predData?.data) ? predData.data : [];
+
         updateStats();
         updateCharts();
     } catch (error) {
@@ -93,25 +95,20 @@ async function loadDashboardData() {
 function updateStats() {
     if (!Array.isArray(allEnrollments)) return;
 
-    // Total enrollees
     const totalEnrollees = allEnrollments.reduce((sum, e) => {
-        return sum + (parseInt(e.male) || 0) + (parseInt(e.female) || 0);
+        return sum + (parseInt(e.male, 10) || 0) + (parseInt(e.female, 10) || 0);
     }, 0);
     document.getElementById('total-enrollees').textContent = totalEnrollees.toLocaleString();
 
-    // Total programs
     const programs = new Set(allEnrollments.map(e => e.program_id));
     document.getElementById('total-programs').textContent = programs.size;
 
-    // Total years
     const years = new Set(allEnrollments.map(e => e.academic_year));
     document.getElementById('total-years').textContent = years.size;
 
-    // Total predictions
-    document.getElementById('total-predictions').textContent = (Array.isArray(allPredictions) ? allPredictions.length : 0);
+    document.getElementById('total-predictions').textContent = Array.isArray(allPredictions) ? allPredictions.length : 0;
 }
 
-// ========== CHARTS ==========
 function updateCharts() {
     updateTrendChart();
     updateGenderChart();
@@ -128,7 +125,7 @@ function updateTrendChart() {
             if (!programTotals[e.program_id]) {
                 programTotals[e.program_id] = 0;
             }
-            programTotals[e.program_id] += (parseInt(e.male) || 0) + (parseInt(e.female) || 0);
+            programTotals[e.program_id] += (parseInt(e.male, 10) || 0) + (parseInt(e.female, 10) || 0);
         });
     }
 
@@ -140,10 +137,10 @@ function updateTrendChart() {
     trendChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: labels,
+            labels,
             datasets: [{
                 label: 'Total Enrollees by Program',
-                data: data,
+                data,
                 backgroundColor: 'rgba(102, 126, 234, 0.8)',
                 borderColor: 'rgba(102, 126, 234, 1)',
                 borderWidth: 2,
@@ -152,20 +149,11 @@ function updateTrendChart() {
         },
         options: {
             responsive: true,
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top'
-                },
-                datalabels: {
-                    display: true
-                }
-            },
             scales: {
                 y: {
                     beginAtZero: true,
                     ticks: {
-                        callback: function(value) {
+                        callback: function (value) {
                             return value.toLocaleString();
                         }
                     }
@@ -179,12 +167,13 @@ function updateGenderChart() {
     const ctx = document.getElementById('genderChart');
     if (!ctx) return;
 
-    let totalMale = 0, totalFemale = 0;
+    let totalMale = 0;
+    let totalFemale = 0;
 
     if (Array.isArray(allEnrollments)) {
         allEnrollments.forEach(e => {
-            totalMale += parseInt(e.male) || 0;
-            totalFemale += parseInt(e.female) || 0;
+            totalMale += parseInt(e.male, 10) || 0;
+            totalFemale += parseInt(e.female, 10) || 0;
         });
     }
 
@@ -207,24 +196,12 @@ function updateGenderChart() {
                 legend: {
                     display: true,
                     position: 'bottom'
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            const label = context.label || '';
-                            const value = context.parsed || 0;
-                            const total = totalMale + totalFemale;
-                            const percentage = ((value / total) * 100).toFixed(1);
-                            return `${label}: ${value} (${percentage}%)`;
-                        }
-                    }
                 }
             }
         }
     });
 }
 
-// ========== ENROLLMENTS TAB ==========
 async function refreshEnrollments() {
     try {
         const programFilter = document.getElementById('enrollProgram')?.value || '';
@@ -254,7 +231,7 @@ async function refreshEnrollments() {
                 <td>${semesterNames[e.semester] || e.semester}</td>
                 <td><strong>${e.male}</strong></td>
                 <td><strong>${e.female}</strong></td>
-                <td><strong>${parseInt(e.male) + parseInt(e.female)}</strong></td>
+                <td><strong>${(parseInt(e.male, 10) || 0) + (parseInt(e.female, 10) || 0)}</strong></td>
                 <td>
                     <button class="btn btn-danger" onclick="deleteEnrollment(${e.id})">Delete</button>
                 </td>
@@ -271,9 +248,7 @@ async function deleteEnrollment(id) {
     try {
         const response = await fetch('api/delete-enrollment.php', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `id=${id}`
         });
 
@@ -290,7 +265,6 @@ async function deleteEnrollment(id) {
     }
 }
 
-// ========== ADD ENROLLMENT ==========
 async function handleAddEnrollment(event) {
     event.preventDefault();
 
@@ -335,14 +309,13 @@ function displayRecentAdded() {
                 <div class="recent-info">${e.academic_year} - ${semesterNames[e.semester]}</div>
             </div>
             <div style="text-align: right;">
-                <div><strong>${parseInt(e.male) + parseInt(e.female)}</strong> students</div>
+                <div><strong>${(parseInt(e.male, 10) || 0) + (parseInt(e.female, 10) || 0)}</strong> students</div>
                 <div class="recent-info">${e.male}M / ${e.female}F</div>
             </div>
         </div>
     `).join('');
 }
 
-// ========== PREDICTIONS TAB ==========
 async function refreshPredictions() {
     try {
         const programFilter = document.getElementById('predProgram')?.value || '';
@@ -368,6 +341,10 @@ async function refreshPredictions() {
         grid.innerHTML = filtered.map(p => `
             <div class="prediction-card">
                 <h4>${programNames[p.program_id] || `Program ${p.program_id}`}</h4>
+                <div class="prediction-item">
+                    <span class="prediction-label">Model</span>
+                    <span class="prediction-value">${p.model_name || 'Ensemble'}</span>
+                </div>
                 <div class="prediction-item">
                     <span class="prediction-label">Academic Year</span>
                     <span class="prediction-value">${p.academic_year}</span>
@@ -395,13 +372,11 @@ async function refreshPredictions() {
     }
 }
 
-// ========== POPULATE SELECT OPTIONS ==========
 async function populateSelectOptions() {
     try {
         const programRes = await fetch('api/programs.php');
         const programs = await programRes.json();
 
-        // Populate program dropdowns
         const selects = ['formProgram', 'enrollProgram', 'predProgram'];
         selects.forEach(selectId => {
             const select = document.getElementById(selectId);
@@ -415,7 +390,6 @@ async function populateSelectOptions() {
             }
         });
 
-        // Populate year dropdowns
         loadDashboardData().then(() => {
             const years = [...new Set(allEnrollments.map(e => e.academic_year))].sort().reverse();
             const yearSelects = ['enrollYear', 'predYear'];
@@ -431,7 +405,6 @@ async function populateSelectOptions() {
                 }
             });
         });
-
     } catch (error) {
         console.error('Error populating options:', error);
     }
