@@ -338,6 +338,7 @@ tbody tr:hover{
     margin:10px 0;
     padding:8px 0;
     border-bottom:1px solid rgba(255,255,255,0.2);
+    gap:10px;
 }
 
 .prediction-item:last-child{
@@ -400,8 +401,6 @@ tbody tr:hover{
 #loginForm button{
     width:100%;
 }
-
-/* ===== EVALUATION TAB ===== */
 
 .metrics-container{
     display:grid;
@@ -481,12 +480,6 @@ tbody tr:hover{
     font-size:14px;
 }
 
-.metric-category{
-    font-size:11px;
-    color:#718096;
-    margin-top:2px;
-}
-
 .comparison-table{
     width:100%;
     border-collapse:collapse;
@@ -553,6 +546,61 @@ tbody tr:hover{
     border-radius:6px;
 }
 
+.custom-legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:14px;
+    margin-bottom:16px;
+    padding:12px 14px;
+    background:#f8fafc;
+    border-radius:12px;
+    border:1px solid #e2e8f0;
+}
+
+.legend-item{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:14px;
+    font-weight:600;
+}
+
+.legend-line{
+    display:inline-block;
+    width:24px;
+    height:4px;
+    border-radius:2px;
+}
+
+.prediction-table-wrap{
+    overflow-x:auto;
+    margin-top:20px;
+}
+
+.prediction-compare-table{
+    width:100%;
+    border-collapse:collapse;
+    background:white;
+    border-radius:12px;
+    overflow:hidden;
+    box-shadow:0 4px 15px rgba(0,0,0,0.08);
+}
+
+.prediction-compare-table thead{
+    background:#f8fafc;
+}
+
+.prediction-compare-table th,
+.prediction-compare-table td{
+    padding:12px 15px;
+    border-bottom:1px solid #e2e8f0;
+    text-align:left;
+}
+
+.prediction-compare-table tbody tr:hover{
+    background:#f8fafc;
+}
+
 @media(max-width:768px){
     .programs-charts-grid{
         grid-template-columns:1fr;
@@ -614,7 +662,6 @@ tbody tr:hover{
         </div>
     </div>
 
-    <!-- OVERVIEW -->
     <div id="overview" class="tab-content active">
         <div class="summary-grid" id="summaryGrid"></div>
 
@@ -658,7 +705,6 @@ tbody tr:hover{
         </div>
     </div>
 
-    <!-- ENROLLMENTS -->
     <div id="enrollments" class="tab-content">
         <div class="card">
             <h2>📋 Enrollment Records</h2>
@@ -695,7 +741,6 @@ tbody tr:hover{
         </div>
     </div>
 
-    <!-- ADD -->
     <div id="add-enrollment" class="tab-content">
         <div class="card">
             <h2>➕ Add New Enrollment Record</h2>
@@ -752,7 +797,6 @@ tbody tr:hover{
         </div>
     </div>
 
-    <!-- PREDICTIONS -->
     <div id="predictions" class="tab-content">
         <div class="card">
             <h2>🔮 Enrollment Predictions with Historical Data</h2>
@@ -767,8 +811,27 @@ tbody tr:hover{
 
             <div id="predictionChartContainer" class="card" style="margin-top:20px;display:none;">
                 <h3 id="predictionChartTitle"></h3>
+                <div id="predictionLegend" class="custom-legend" style="display:none;"></div>
                 <div class="chart-container">
                     <canvas id="predictionChart"></canvas>
+                </div>
+            </div>
+
+            <div id="predictionCompareContainer" class="card" style="margin-top:20px;display:none;">
+                <h3>📋 Prediction Comparison by Algorithm</h3>
+                <div class="prediction-table-wrap">
+                    <table class="prediction-compare-table">
+                        <thead>
+                            <tr>
+                                <th>Period</th>
+                                <th style="color:#5C6BC0;">SARMAX</th>
+                                <th style="color:#D81B60;">Prophet</th>
+                                <th style="color:#FB8C00;">LSTM</th>
+                                <th style="color:#00897B;">Ensemble</th>
+                            </tr>
+                        </thead>
+                        <tbody id="predictionCompareTableBody"></tbody>
+                    </table>
                 </div>
             </div>
 
@@ -778,7 +841,6 @@ tbody tr:hover{
         </div>
     </div>
 
-    <!-- EVALUATION -->
     <div id="evaluation" class="tab-content">
         <div class="card">
             <h2>📊 Model Evaluation Metrics</h2>
@@ -935,6 +997,7 @@ class EnrollmentTracker{
                 }else if(tabId === 'predictions'){
                     document.getElementById('predictionChartContainer').style.display = 'none';
                     document.getElementById('predictionStatsContainer').style.display = 'none';
+                    document.getElementById('predictionCompareContainer').style.display = 'none';
                 }else if(tabId === 'overview'){
                     this.loadAllProgramsCharts();
                     this.refreshCombinedChart();
@@ -1047,6 +1110,7 @@ class EnrollmentTracker{
         document.getElementById('predProgramFilter')?.addEventListener('change',()=>{
             document.getElementById('predictionChartContainer').style.display = 'none';
             document.getElementById('predictionStatsContainer').style.display = 'none';
+            document.getElementById('predictionCompareContainer').style.display = 'none';
         });
 
         document.getElementById('logoutBtn')?.addEventListener('click',()=>{
@@ -1713,6 +1777,38 @@ class EnrollmentTracker{
         `).join('');
     }
 
+    buildPredictionMap(predictions){
+        const modelMap = {
+            SARMAX: {},
+            Prophet: {},
+            LSTM: {},
+            Ensemble: {}
+        };
+
+        predictions.forEach(pred => {
+            const key = `${pred.academic_year} S${pred.semester}`;
+            const modelName = pred.model_name || 'Ensemble';
+            if (!modelMap[modelName]) modelMap[modelName] = {};
+            modelMap[modelName][key] = pred;
+        });
+
+        return modelMap;
+    }
+
+    renderPredictionLegend(){
+        const legend = document.getElementById('predictionLegend');
+        if(!legend) return;
+
+        legend.innerHTML = `
+            <div class="legend-item"><span class="legend-line" style="background:#2E7D32;"></span>Historical Total</div>
+            <div class="legend-item"><span class="legend-line" style="background:#5C6BC0;"></span>SARMAX</div>
+            <div class="legend-item"><span class="legend-line" style="background:#D81B60;"></span>Prophet</div>
+            <div class="legend-item"><span class="legend-line" style="background:#FB8C00;"></span>LSTM</div>
+            <div class="legend-item"><span class="legend-line" style="background:#00897B;"></span>Ensemble</div>
+        `;
+        legend.style.display = 'flex';
+    }
+
     refreshPredictions(){
         try{
             const programFilter = document.getElementById('predProgramFilter').value;
@@ -1722,19 +1818,20 @@ class EnrollmentTracker{
                 return;
             }
 
-            const allData = this.allEnrollments.filter(e => {
+            const historicalData = this.allEnrollments.filter(e => {
                 const [startYear, endYear] = String(e.academic_year).split('-').map(y => parseInt(y));
                 return (endYear - startYear) === 1 && e.program_id == programFilter;
             });
 
-            if(allData.length === 0){
+            if(historicalData.length === 0){
                 this.showStatus('No historical data for this program','error','status');
                 return;
             }
 
             const predictions = this.allPredictions.filter(p => p.program_id == programFilter);
-            this.createPredictionChart(programFilter, allData, predictions);
+            this.createPredictionChart(programFilter, historicalData, predictions);
             this.displayPredictionStats(predictions);
+            this.displayPredictionComparison(predictions);
 
         }catch(e){
             this.showStatus('Error loading predictions: '+e.message,'error','status');
@@ -1748,30 +1845,35 @@ class EnrollmentTracker{
             return yearA-yearB||parseInt(a.semester)-parseInt(b.semester);
         });
 
-        const labels = historicalData.map(e=>`${e.academic_year} S${e.semester}`);
-        const totals = historicalData.map(e=>(parseInt(e.male)||0)+(parseInt(e.female)||0));
-        const males = historicalData.map(e=>parseInt(e.male)||0);
-        const females = historicalData.map(e=>parseInt(e.female)||0);
+        const historicalLabels = historicalData.map(e=>`${e.academic_year} S${e.semester}`);
+        const historicalTotals = historicalData.map(e=>(parseInt(e.male)||0)+(parseInt(e.female)||0));
 
-        let allLabels = [...labels];
-        let allTotals = [...totals];
-        let allMales = [...males];
-        let allFemales = [...females];
+        const modelMap = this.buildPredictionMap(predictions);
+        const predictionPeriods = [...new Set(predictions.map(p => `${p.academic_year} S${p.semester}`))];
 
-        if(predictions && predictions.length > 0){
-            predictions.sort((a,b)=>{
-                const yearA=parseInt(String(a.academic_year).split('-')[0]);
-                const yearB=parseInt(String(b.academic_year).split('-')[0]);
-                return yearA-yearB||parseInt(a.semester)-parseInt(b.semester);
-            });
+        const allLabels = [...historicalLabels];
+        predictionPeriods.forEach(label => {
+            if (!allLabels.includes(label)) allLabels.push(label);
+        });
 
-            predictions.forEach(pred => {
-                allLabels.push(`${pred.academic_year} S${pred.semester} (Pred)`);
-                allTotals.push(parseInt(pred.predicted_total)||0);
-                allMales.push(parseInt(pred.predicted_male)||0);
-                allFemales.push(parseInt(pred.predicted_female)||0);
-            });
-        }
+        const historicalLookup = {};
+        historicalData.forEach(e => {
+            historicalLookup[`${e.academic_year} S${e.semester}`] = (parseInt(e.male)||0)+(parseInt(e.female)||0);
+        });
+
+        const makeSeries = (lookupMap) => allLabels.map(label =>
+            Object.prototype.hasOwnProperty.call(lookupMap, label) ? lookupMap[label] : null
+        );
+
+        const sarmaxLookup = {};
+        const prophetLookup = {};
+        const lstmLookup = {};
+        const ensembleLookup = {};
+
+        Object.entries(modelMap.SARMAX || {}).forEach(([k, v]) => sarmaxLookup[k] = parseInt(v.predicted_total)||0);
+        Object.entries(modelMap.Prophet || {}).forEach(([k, v]) => prophetLookup[k] = parseInt(v.predicted_total)||0);
+        Object.entries(modelMap.LSTM || {}).forEach(([k, v]) => lstmLookup[k] = parseInt(v.predicted_total)||0);
+        Object.entries(modelMap.Ensemble || {}).forEach(([k, v]) => ensembleLookup[k] = parseInt(v.predicted_total)||0);
 
         const ctx = document.getElementById('predictionChart');
         if(!ctx) return;
@@ -1781,7 +1883,8 @@ class EnrollmentTracker{
         }
 
         const programName = programNames[programId] || `Program ${programId}`;
-        document.getElementById('predictionChartTitle').textContent = `${programName} - Historical & Predicted Enrollment`;
+        document.getElementById('predictionChartTitle').textContent = `${programName} - Historical & Algorithm Predictions`;
+        this.renderPredictionLegend();
 
         this.predictionChart = new Chart(ctx, {
             type: 'line',
@@ -1789,35 +1892,54 @@ class EnrollmentTracker{
                 labels: allLabels,
                 datasets: [
                     {
-                        label: 'Total',
-                        data: allTotals,
-                        borderColor: '#ed8936',
-                        backgroundColor: 'rgba(237, 137, 54, 0.1)',
+                        label: 'Historical Total',
+                        data: makeSeries(historicalLookup),
+                        borderColor: '#2E7D32',
+                        backgroundColor: 'rgba(46,125,50,0.10)',
+                        borderWidth: 4,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 5
+                    },
+                    {
+                        label: 'SARMAX',
+                        data: makeSeries(sarmaxLookup),
+                        borderColor: '#5C6BC0',
                         borderWidth: 3,
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 5,
-                        pointBackgroundColor: '#ed8936'
+                        borderDash: [8,5],
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 4
                     },
                     {
-                        label: 'Male',
-                        data: allMales,
-                        borderColor: '#2b6cb0',
-                        borderWidth: 2,
+                        label: 'Prophet',
+                        data: makeSeries(prophetLookup),
+                        borderColor: '#D81B60',
+                        borderWidth: 3,
+                        borderDash: [4,4],
                         fill: false,
-                        tension: 0.4,
-                        pointRadius: 4,
-                        pointBackgroundColor: '#2b6cb0'
+                        tension: 0.3,
+                        pointRadius: 4
                     },
                     {
-                        label: 'Female',
-                        data: allFemales,
-                        borderColor: '#d53f8c',
-                        borderWidth: 2,
+                        label: 'LSTM',
+                        data: makeSeries(lstmLookup),
+                        borderColor: '#FB8C00',
+                        borderWidth: 3,
+                        borderDash: [2,6],
                         fill: false,
-                        tension: 0.4,
-                        pointRadius: 4,
-                        pointBackgroundColor: '#d53f8c'
+                        tension: 0.3,
+                        pointRadius: 4
+                    },
+                    {
+                        label: 'Ensemble',
+                        data: makeSeries(ensembleLookup),
+                        borderColor: '#00897B',
+                        borderWidth: 4,
+                        borderDash: [10,5],
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 5
                     }
                 ]
             },
@@ -1826,16 +1948,15 @@ class EnrollmentTracker{
                 maintainAspectRatio: false,
                 plugins: {
                     datalabels: {
-                        display: true,
-                        font: {weight: 'bold', size: 10},
-                        color: '#2d3748',
-                        backgroundColor: 'rgba(255,255,255,0.9)',
-                        borderRadius: 4,
-                        padding: 4,
-                        anchor: 'end',
-                        align: 'top'
+                        display: false
                     },
-                    legend: { display: true, position: 'top' }
+                    legend: {
+                        display: false
+                    }
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false
                 },
                 scales: {
                     y: {
@@ -1845,11 +1966,37 @@ class EnrollmentTracker{
                         }
                     }
                 }
-            },
-            plugins: [ChartDataLabels]
+            }
         });
 
         document.getElementById('predictionChartContainer').style.display = 'block';
+    }
+
+    displayPredictionComparison(predictions){
+        const container = document.getElementById('predictionCompareContainer');
+        const tbody = document.getElementById('predictionCompareTableBody');
+        if(!container || !tbody) return;
+
+        if(!predictions || predictions.length === 0){
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center">No predictions available</td></tr>';
+            container.style.display = 'block';
+            return;
+        }
+
+        const modelMap = this.buildPredictionMap(predictions);
+        const periods = [...new Set(predictions.map(p => `${p.academic_year} S${p.semester}`))];
+
+        tbody.innerHTML = periods.map(period => `
+            <tr>
+                <td><strong>${period}</strong></td>
+                <td>${modelMap.SARMAX?.[period]?.predicted_total ?? '—'}</td>
+                <td>${modelMap.Prophet?.[period]?.predicted_total ?? '—'}</td>
+                <td>${modelMap.LSTM?.[period]?.predicted_total ?? '—'}</td>
+                <td>${modelMap.Ensemble?.[period]?.predicted_total ?? '—'}</td>
+            </tr>
+        `).join('');
+
+        container.style.display = 'block';
     }
 
     displayPredictionStats(predictions){
@@ -1867,6 +2014,10 @@ class EnrollmentTracker{
         grid.innerHTML = predictions.map(p => `
             <div class="prediction-card">
                 <h4>${programNames[p.program_id] || p.program_id}</h4>
+                <div class="prediction-item">
+                    <span class="prediction-label">Algorithm</span>
+                    <span class="prediction-value">${p.model_name || 'Ensemble'}</span>
+                </div>
                 <div class="prediction-item">
                     <span class="prediction-label">Academic Year</span>
                     <span class="prediction-value">${p.academic_year}</span>

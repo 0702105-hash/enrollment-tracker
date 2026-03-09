@@ -59,6 +59,7 @@ class EnrollmentTracker {
             this.renderSummary();
             this.renderChart();
             this.renderMetrics();
+            this.renderPredictionComparisonTable();
         } catch (error) {
             console.error('Load error:', error);
             if (chartContainer) {
@@ -108,9 +109,28 @@ class EnrollmentTracker {
         return modelMap;
     }
 
+    renderCustomLegend(container) {
+        const legendHtml = `
+            <div id="customPredictionLegend" style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px;padding:12px 14px;background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0;">
+                <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:18px;height:4px;background:#2E7D32;"></span><strong>Historical Total</strong></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:18px;height:4px;background:#5C6BC0;"></span><strong>SARMAX</strong></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:18px;height:4px;background:#D81B60;"></span><strong>Prophet</strong></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:18px;height:4px;background:#FB8C00;"></span><strong>LSTM</strong></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:18px;height:4px;background:#00897B;"></span><strong>Ensemble</strong></div>
+            </div>
+        `;
+        container.insertAdjacentHTML('afterbegin', legendHtml);
+    }
+
     renderChart() {
+        const chartContainer = document.querySelector('.chart-container');
         const canvas = document.getElementById('enrollmentChart');
-        if (!canvas) return;
+        if (!canvas || !chartContainer) return;
+
+        const oldLegend = document.getElementById('customPredictionLegend');
+        if (oldLegend) oldLegend.remove();
+
+        this.renderCustomLegend(chartContainer);
 
         const ctx = canvas.getContext('2d');
         if (window.enrollmentChart) window.enrollmentChart.destroy();
@@ -145,41 +165,53 @@ class EnrollmentTracker {
                         borderColor: '#2E7D32',
                         backgroundColor: 'rgba(46,125,50,0.12)',
                         fill: false,
-                        borderWidth: 3,
-                        tension: 0.3
+                        borderWidth: 4,
+                        tension: 0.25,
+                        pointRadius: 4
                     },
                     {
                         label: 'SARMAX',
                         data: makeSeries(predictionMap.SARMAX || {}),
                         borderColor: '#5C6BC0',
+                        backgroundColor: 'rgba(92,107,192,0.12)',
                         fill: false,
-                        borderDash: [6, 4],
-                        tension: 0.3
+                        borderDash: [8, 5],
+                        borderWidth: 3,
+                        tension: 0.25,
+                        pointRadius: 4
                     },
                     {
                         label: 'Prophet',
                         data: makeSeries(predictionMap.Prophet || {}),
                         borderColor: '#D81B60',
+                        backgroundColor: 'rgba(216,27,96,0.12)',
                         fill: false,
-                        borderDash: [6, 4],
-                        tension: 0.3
+                        borderDash: [4, 4],
+                        borderWidth: 3,
+                        tension: 0.25,
+                        pointRadius: 4
                     },
                     {
                         label: 'LSTM',
                         data: makeSeries(predictionMap.LSTM || {}),
                         borderColor: '#FB8C00',
+                        backgroundColor: 'rgba(251,140,0,0.12)',
                         fill: false,
-                        borderDash: [6, 4],
-                        tension: 0.3
+                        borderDash: [2, 6],
+                        borderWidth: 3,
+                        tension: 0.25,
+                        pointRadius: 4
                     },
                     {
                         label: 'Ensemble',
                         data: makeSeries(predictionMap.Ensemble || {}),
                         borderColor: '#00897B',
+                        backgroundColor: 'rgba(0,137,123,0.12)',
                         fill: false,
-                        borderWidth: 3,
+                        borderWidth: 4,
                         borderDash: [10, 5],
-                        tension: 0.3
+                        tension: 0.25,
+                        pointRadius: 5
                     }
                 ]
             },
@@ -188,6 +220,9 @@ class EnrollmentTracker {
                 maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
+                    legend: {
+                        display: false
+                    },
                     title: {
                         display: true,
                         text: 'Enrollment Trends and Multi-Model Predictions',
@@ -303,6 +338,56 @@ class EnrollmentTracker {
                 ${buildMetricRows('SARMAX', '#5C6BC0')}
                 ${buildMetricRows('Prophet', '#D81B60')}
                 ${buildMetricRows('LSTM', '#FB8C00')}
+            </div>
+        `;
+
+        chartContainer.appendChild(panel);
+    }
+
+    renderPredictionComparisonTable() {
+        const chartContainer = document.querySelector('.chart-container');
+        if (!chartContainer) return;
+
+        const existing = document.getElementById('predictionComparisonPanel');
+        if (existing) existing.remove();
+
+        if (!this.currentProgramId || !this.predictions.length) return;
+
+        const predictionMap = this.buildPredictionMap();
+        const periods = [...new Set(this.predictions.map(p => `${p.academic_year} S${p.semester}`))];
+
+        const rows = periods.map(period => `
+            <tr>
+                <td style="padding:10px;border-bottom:1px solid #eee;"><strong>${period}</strong></td>
+                <td style="padding:10px;border-bottom:1px solid #eee;">${predictionMap.SARMAX?.[period] ?? '—'}</td>
+                <td style="padding:10px;border-bottom:1px solid #eee;">${predictionMap.Prophet?.[period] ?? '—'}</td>
+                <td style="padding:10px;border-bottom:1px solid #eee;">${predictionMap.LSTM?.[period] ?? '—'}</td>
+                <td style="padding:10px;border-bottom:1px solid #eee;">${predictionMap.Ensemble?.[period] ?? '—'}</td>
+            </tr>
+        `).join('');
+
+        const panel = document.createElement('div');
+        panel.id = 'predictionComparisonPanel';
+        panel.style.marginTop = '24px';
+        panel.innerHTML = `
+            <div style="background:#fff;border-radius:14px;padding:18px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+                <h2 style="margin:0 0 14px 0;">Prediction Comparison by Algorithm</h2>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:#f8fafc;">
+                                <th style="padding:10px;text-align:left;">Period</th>
+                                <th style="padding:10px;text-align:left;color:#5C6BC0;">SARMAX</th>
+                                <th style="padding:10px;text-align:left;color:#D81B60;">Prophet</th>
+                                <th style="padding:10px;text-align:left;color:#FB8C00;">LSTM</th>
+                                <th style="padding:10px;text-align:left;color:#00897B;">Ensemble</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         `;
 
