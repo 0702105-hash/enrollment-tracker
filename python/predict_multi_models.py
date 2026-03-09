@@ -3,12 +3,10 @@
 Multi-Model Enrollment Prediction System
 Supports: SARMAX, Facebook Prophet, and LSTM
 Generates predictions for multiple future years with comprehensive evaluation metrics
-Saves all metrics to database for dashboard visualization
-Also saves per-model predictions for dashboard chart comparison.
+Saves per-model predictions and metrics for dashboard visualization.
 """
 
 import time
-from datetime import datetime
 
 import mysql.connector
 import numpy as np
@@ -20,6 +18,7 @@ warnings.filterwarnings('ignore')
 from prophet import Prophet
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import MinMaxScaler
+from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import LSTM, Dense, Dropout
@@ -50,11 +49,17 @@ PROGRAM_NAMES = {
 }
 
 
-class ModelEvaluator:
-    """Calculate and store model evaluation metrics"""
+def is_valid_metric_value(value):
+    try:
+        numeric_value = float(value)
+        return np.isfinite(numeric_value)
+    except (TypeError, ValueError):
+        return False
 
+
+class ModelEvaluator:
     @staticmethod
-    def calculate_metrics(y_true, y_pred, model_name=""):
+    def calculate_metrics(y_true, y_pred):
         y_true = np.array(y_true, dtype=float)
         y_pred = np.array(y_pred, dtype=float)
         y_pred = np.maximum(y_pred, 0)
@@ -67,9 +72,12 @@ class ModelEvaluator:
         if mask.any():
             mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
         else:
-            mape = np.inf
+            mape = np.nan
 
-        r2 = r2_score(y_true, y_pred)
+        try:
+            r2 = r2_score(y_true, y_pred)
+        except Exception:
+            r2 = np.nan
 
         log_true = np.log1p(y_true)
         log_pred = np.log1p(y_pred)
@@ -78,33 +86,28 @@ class ModelEvaluator:
         if len(y_true) > 1:
             naive_pred = y_true[:-1]
             naive_rmse = np.sqrt(mean_squared_error(y_true[1:], naive_pred))
-            theil_u = rmse / naive_rmse if naive_rmse != 0 else 0.0
+            theil_u = rmse / naive_rmse if naive_rmse != 0 else np.nan
         else:
-            theil_u = 0.0
+            theil_u = np.nan
 
         return {
-            'MAE': round(float(mae), 2),
-            'RMSE': round(float(rmse), 2),
-            'MAPE': round(float(mape), 2),
-            'R²': round(float(r2), 4),
-            'RMSLE': round(float(rmsle), 4),
-            'Theil_U': round(float(theil_u), 4)
+            'MAE': round(float(mae), 2) if is_valid_metric_value(mae) else np.nan,
+            'RMSE': round(float(rmse), 2) if is_valid_metric_value(rmse) else np.nan,
+            'MAPE': round(float(mape), 2) if is_valid_metric_value(mape) else np.nan,
+            'MSE': round(float(mse), 2) if is_valid_metric_value(mse) else np.nan,
+            'R²': round(float(r2), 4) if is_valid_metric_value(r2) else np.nan,
+            'RMSLE': round(float(rmsle), 4) if is_valid_metric_value(rmsle) else np.nan,
+            'Theil_U': round(float(theil_u), 4) if is_valid_metric_value(theil_u) else np.nan
         }
 
     @staticmethod
     def print_metrics(metrics, model_name="Model"):
         print(f"\n   📊 {model_name} Evaluation Metrics:")
-        print(f"      MAE:       {metrics['MAE']:<8}   (Mean Absolute Error)")
-        print(f"      RMSE:      {metrics['RMSE']:<8}   (Root Mean Squared Error)")
-        print(f"      MAPE:      {metrics['MAPE']:<8}%  (Mean Absolute Percentage Error)")
-        print(f"      R²:        {metrics['R²']:<8}   (Coefficient of Determination)")
-        print(f"      RMSLE:     {metrics['RMSLE']:<8}   (Root Mean Squared Log Error)")
-        print(f"      Theil-U:   {metrics['Theil_U']:<8}   (Theil Inequality Coefficient)")
+        for key, value in metrics.items():
+            print(f"      {key:<16}: {value}")
 
 
 class SARMAXPredictor:
-    """SARMAX (Seasonal ARIMA) for time series forecasting"""
-
     def __init__(self, order=(1, 1, 1), seasonal_order=(1, 1, 1, 3)):
         self.order = order
         self.seasonal_order = seasonal_order
@@ -127,7 +130,30 @@ class SARMAXPredictor:
             forecast = self.fitted_model.get_forecast(steps=len(y_test))
             predictions = np.array(forecast.predicted_mean)
 
-            self.metrics = ModelEvaluator.calculate_metrics(y_test, predictions, "SARMAX")
+            self.metrics = ModelEvaluator.calculate_metrics(y_test, predictions)
+
+            try:
+                residuals = np.array(y_train) - np.array(self.fitted_model.fittedvalues)
+                lag_count = min(10, max(1, len(residuals) - 1))
+                lb_test = acorr_ljungbox(residuals, lags=lag_count, return_df=True)
+
+                if is_valid_metric_value(self.fitted_model.aic):
+                    self.metrics['AIC'] = round(float(self.fitted_model.aic), 2)
+                else:
+                    self.metrics['AIC'] = np.nan
+
+                if is_valid_metric_value(self.fitted_model.bic):
+                    self.metrics['BIC'] = round(float(self.fitted_model.bic), 2)
+                else:
+                    self.metrics['BIC'] = np.nan
+
+                lb_pvalue = lb_test.iloc[-1, 1]
+                self.metrics['Ljung_Box_Pvalue'] = round(float(lb_pvalue), 4) if is_valid_metric_value(lb_pvalue) else np.nan
+            except Exception:
+                self.metrics.setdefault('AIC', np.nan)
+                self.metrics.setdefault('BIC', np.nan)
+                self.metrics.setdefault('Ljung_Box_Pvalue', np.nan)
+
             return True
         except Exception as e:
             print(f"      ❌ SARMAX training error: {str(e)}")
@@ -140,12 +166,12 @@ class SARMAXPredictor:
         try:
             forecast = self.fitted_model.get_forecast(steps=steps)
             predictions = np.array(forecast.predicted_mean)
-            conf_int = forecast.conf_int()
+            conf_int = np.asarray(forecast.conf_int())
 
             return {
                 'predictions': np.maximum(predictions, 0),
-                'lower_ci': np.maximum(np.array(conf_int.iloc[:, 0]), 0),
-                'upper_ci': np.maximum(np.array(conf_int.iloc[:, 1]), 0),
+                'lower_ci': np.maximum(conf_int[:, 0], 0),
+                'upper_ci': np.maximum(conf_int[:, 1], 0),
                 'metrics': self.metrics
             }
         except Exception as e:
@@ -154,8 +180,6 @@ class SARMAXPredictor:
 
 
 class ProphetPredictor:
-    """Facebook Prophet for time series forecasting with seasonality"""
-
     def __init__(self, yearly_seasonality=False, weekly_seasonality=False):
         self.yearly_seasonality = yearly_seasonality
         self.weekly_seasonality = weekly_seasonality
@@ -176,8 +200,7 @@ class ProphetPredictor:
             self.model = Prophet(
                 yearly_seasonality=self.yearly_seasonality,
                 weekly_seasonality=self.weekly_seasonality,
-                interval_width=0.95,
-                stan_backend='cmdstanpy'
+                interval_width=0.95
             )
             self.model.fit(train_df)
 
@@ -185,7 +208,17 @@ class ProphetPredictor:
             forecast = self.model.predict(future)
             predictions = forecast['yhat'].tail(len(y_test)).values
 
-            self.metrics = ModelEvaluator.calculate_metrics(y_test, predictions, "Prophet")
+            self.metrics = ModelEvaluator.calculate_metrics(y_test, predictions)
+
+            mask = np.array(y_test) != 0
+            if mask.any():
+                mdape = np.median(
+                    np.abs((np.array(y_test)[mask] - predictions[mask]) / np.array(y_test)[mask])
+                ) * 100
+                self.metrics['MdAPE'] = round(float(mdape), 2) if is_valid_metric_value(mdape) else np.nan
+            else:
+                self.metrics['MdAPE'] = np.nan
+
             return True
         except Exception as e:
             print(f"      ❌ Prophet training error: {str(e)}")
@@ -215,8 +248,6 @@ class ProphetPredictor:
 
 
 class LSTMPredictor:
-    """LSTM (Long Short-Term Memory) Neural Network for time series"""
-
     def __init__(self, sequence_length=4, lstm_units=32, epochs=100, batch_size=8):
         self.sequence_length = sequence_length
         self.lstm_units = lstm_units
@@ -264,7 +295,7 @@ class LSTMPredictor:
                 restore_best_weights=True
             )
 
-            self.model.fit(
+            history = self.model.fit(
                 X_train, y_train_seq,
                 epochs=self.epochs,
                 batch_size=self.batch_size,
@@ -277,11 +308,14 @@ class LSTMPredictor:
             predictions = self.scaler.inverse_transform(predictions_scaled)
             y_test_actual = y_test[self.sequence_length:]
 
-            self.metrics = ModelEvaluator.calculate_metrics(
-                y_test_actual,
-                predictions.flatten(),
-                "LSTM"
-            )
+            self.metrics = ModelEvaluator.calculate_metrics(y_test_actual, predictions.flatten())
+
+            train_loss = history.history['loss'][-1] if history.history.get('loss') else np.nan
+            val_loss = history.history['val_loss'][-1] if history.history.get('val_loss') else np.nan
+
+            self.metrics['Training_Loss'] = round(float(train_loss), 4) if is_valid_metric_value(train_loss) else np.nan
+            self.metrics['Validation_Loss'] = round(float(val_loss), 4) if is_valid_metric_value(val_loss) else np.nan
+
             return True
         except Exception as e:
             print(f"      ❌ LSTM training error: {str(e)}")
@@ -320,7 +354,6 @@ class LSTMPredictor:
 
 
 def load_enrollment_data():
-    """Load historical enrollment data from database"""
     print("\n📂 Loading historical data...")
     started = time.perf_counter()
 
@@ -340,16 +373,14 @@ def load_enrollment_data():
         print("❌ No historical enrollment data found!")
         return None
 
-    elapsed = time.perf_counter() - started
-    print(f"✅ Loaded {len(df)} records from {df['program_id'].nunique()} programs in {elapsed:.2f}s")
+    print(f"✅ Loaded {len(df)} records from {df['program_id'].nunique()} programs in {time.perf_counter() - started:.2f}s")
     return df
 
 
 def build_gender_ratio_map(df_hist):
-    """Precompute male ratio per program once to avoid repeated DB queries."""
     ratio_map = {}
-
     grouped = df_hist.groupby('program_id')[['male', 'female']].sum().reset_index()
+
     for _, row in grouped.iterrows():
         total_male = float(row['male'])
         total_female = float(row['female'])
@@ -363,11 +394,19 @@ def get_model_confidence(pred_result):
     models_r2 = []
 
     if pred_result.get('sarmax') and pred_result['sarmax'].get('metrics'):
-        models_r2.append(max(pred_result['sarmax']['metrics'].get('R²', 0), 0))
+        r2 = pred_result['sarmax']['metrics'].get('R²', 0)
+        if is_valid_metric_value(r2):
+            models_r2.append(max(float(r2), 0))
+
     if pred_result.get('prophet') and pred_result['prophet'].get('metrics'):
-        models_r2.append(max(pred_result['prophet']['metrics'].get('R²', 0), 0))
+        r2 = pred_result['prophet']['metrics'].get('R²', 0)
+        if is_valid_metric_value(r2):
+            models_r2.append(max(float(r2), 0))
+
     if pred_result.get('lstm') and pred_result['lstm'].get('metrics'):
-        models_r2.append(max(pred_result['lstm']['metrics'].get('R²', 0), 0))
+        r2 = pred_result['lstm']['metrics'].get('R²', 0)
+        if is_valid_metric_value(r2):
+            models_r2.append(max(float(r2), 0))
 
     return float(np.mean(models_r2)) if models_r2 else 0.5
 
@@ -396,39 +435,26 @@ def predict_for_program(program_id, program_data, future_years=1):
     steps = future_years * 3
 
     print("\n   🔮 MODEL 1: SARMAX (Seasonal ARIMA)")
-    sarmax_started = time.perf_counter()
     sarmax_predictor = SARMAXPredictor()
     sarmax_success = sarmax_predictor.train(y_train, y_test)
     sarmax_pred = sarmax_predictor.predict(steps=steps) if sarmax_success else None
     if sarmax_pred and sarmax_pred.get('metrics'):
         ModelEvaluator.print_metrics(sarmax_pred['metrics'], "SARMAX")
-    else:
-        print("      ⚠️  SARMAX model could not be trained")
-    print(f"      ⏱️ SARMAX time: {time.perf_counter() - sarmax_started:.2f}s")
 
     print("\n   🔮 MODEL 2: Facebook Prophet")
-    prophet_started = time.perf_counter()
     prophet_predictor = ProphetPredictor()
     prophet_success = prophet_predictor.train(y_train, y_test)
     prophet_pred = prophet_predictor.predict(steps=steps) if prophet_success else None
     if prophet_pred and prophet_pred.get('metrics'):
         ModelEvaluator.print_metrics(prophet_pred['metrics'], "Prophet")
-    else:
-        print("      ⚠️  Prophet model could not be trained")
-    print(f"      ⏱️ Prophet time: {time.perf_counter() - prophet_started:.2f}s")
 
     print("\n   🔮 MODEL 3: LSTM (Neural Network)")
-    lstm_started = time.perf_counter()
     lstm_predictor = LSTMPredictor(sequence_length=max(1, min(4, len(y_train) // 2)))
     lstm_success = lstm_predictor.train(y_train, y_test)
     lstm_pred = lstm_predictor.predict(y, steps=steps) if lstm_success else None
     if lstm_pred and lstm_pred.get('metrics'):
         ModelEvaluator.print_metrics(lstm_pred['metrics'], "LSTM")
-    else:
-        print("      ⚠️  LSTM model could not be trained")
-    print(f"      ⏱️ LSTM time: {time.perf_counter() - lstm_started:.2f}s")
 
-    print("\n   📈 ENSEMBLE FORECAST (Average of successful models):")
     predictions_list = [
         sarmax_pred['predictions'] if sarmax_pred else None,
         prophet_pred['predictions'] if prophet_pred else None,
@@ -441,7 +467,6 @@ def predict_for_program(program_id, program_data, future_years=1):
         return None
 
     ensemble_pred = np.mean(valid_predictions, axis=0)
-    print(f"      ✅ Ensemble predictions: {len(valid_predictions)} models combined")
 
     return {
         'program_id': program_id,
@@ -453,14 +478,15 @@ def predict_for_program(program_id, program_data, future_years=1):
             'predictions': np.maximum(ensemble_pred, 0),
             'lower_ci': None,
             'upper_ci': None,
-            'metrics': {'R²': get_model_confidence({
-                'sarmax': sarmax_pred,
-                'prophet': prophet_pred,
-                'lstm': lstm_pred
-            })}
+            'metrics': {
+                'R²': get_model_confidence({
+                    'sarmax': sarmax_pred,
+                    'prophet': prophet_pred,
+                    'lstm': lstm_pred
+                })
+            }
         },
-        'future_years': future_years,
-        'historical_data': y
+        'future_years': future_years
     }
 
 
@@ -514,13 +540,11 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio):
 
 
 def save_predictions_to_db(all_predictions, future_years=1, gender_ratio_map=None):
-    """Save per-model and ensemble predictions to database."""
     print(f"\n\n{'=' * 80}")
     print("💾 SAVING PREDICTIONS TO DATABASE")
     print(f"{'=' * 80}")
 
     gender_ratio_map = gender_ratio_map or {}
-    started = time.perf_counter()
 
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
@@ -528,9 +552,7 @@ def save_predictions_to_db(all_predictions, future_years=1, gender_ratio_map=Non
     try:
         for year_offset in range(future_years):
             target_year = 2026 + year_offset
-            cursor.execute(
-                f"DELETE FROM predictions WHERE academic_year LIKE '{target_year}-%'"
-            )
+            cursor.execute(f"DELETE FROM predictions WHERE academic_year LIKE '{target_year}-%'")
 
         conn.commit()
         print("✅ Cleared existing predictions")
@@ -552,7 +574,7 @@ def save_predictions_to_db(all_predictions, future_years=1, gender_ratio_map=Non
             )
 
         conn.commit()
-        print(f"✅ Saved {inserted_count} prediction rows to database in {time.perf_counter() - started:.2f}s")
+        print(f"✅ Saved {inserted_count} prediction rows to database")
 
     except Exception as e:
         print(f"❌ Database error: {str(e)}")
@@ -564,7 +586,6 @@ def save_predictions_to_db(all_predictions, future_years=1, gender_ratio_map=Non
 
 
 def save_model_metrics_to_db(all_predictions):
-    """Save individual model metrics to database for dashboard visualization"""
     print("\n💾 SAVING MODEL METRICS TO DATABASE")
 
     conn = mysql.connector.connect(**DB_CONFIG)
@@ -576,6 +597,7 @@ def save_model_metrics_to_db(all_predictions):
         print("✅ Cleared existing metrics")
 
         inserted_count = 0
+        skipped_count = 0
 
         for pred_result in all_predictions:
             if pred_result is None:
@@ -588,6 +610,11 @@ def save_model_metrics_to_db(all_predictions):
                 model_result = pred_result.get(model_key)
                 if model_result and model_result.get('metrics'):
                     for metric_name, metric_value in model_result['metrics'].items():
+                        if not is_valid_metric_value(metric_value):
+                            skipped_count += 1
+                            print(f"⚠️ Skipping invalid metric: {model_name} | {metric_name} = {metric_value}")
+                            continue
+
                         cursor.execute("""
                             INSERT INTO model_metrics
                             (program_id, model_name, metric_name, metric_value, prediction_year)
@@ -603,6 +630,8 @@ def save_model_metrics_to_db(all_predictions):
 
         conn.commit()
         print(f"✅ Saved {inserted_count} metric records to database")
+        if skipped_count:
+            print(f"⚠️ Skipped {skipped_count} invalid metric values")
 
     except Exception as e:
         print(f"❌ Database error: {str(e)}")
@@ -613,50 +642,6 @@ def save_model_metrics_to_db(all_predictions):
         conn.close()
 
 
-def print_model_performance_summary(all_predictions):
-    print(f"\n\n{'=' * 80}")
-    print("📊 MODEL PERFORMANCE SUMMARY")
-    print(f"{'=' * 80}")
-
-    print(f"\n✅ Processed {len(all_predictions)} programs")
-    print("✅ Generated predictions with 3-model ensemble approach")
-
-    print(f"\n{'=' * 80}")
-    print("📈 MODEL COMPARISON")
-    print(f"{'=' * 80}")
-
-    print("\n1️⃣  SARMAX (Seasonal ARIMA)")
-    print("   ├─ Type: Classical time series")
-    print("   ├─ Order: (p=1, d=1, q=1)")
-    print("   ├─ Seasonality: (P=1, D=1, Q=1, s=3)")
-    print("   ├─ Pros: ✓ Fast, ✓ Interpretable, ✓ Confidence intervals")
-    print("   └─ Cons: ✗ Assumes stationarity, ✗ Limited to linear patterns")
-
-    print("\n2️⃣  Facebook Prophet")
-    print("   ├─ Type: Trend + Seasonality decomposition")
-    print("   ├─ Yearly Seasonality: Disabled")
-    print("   ├─ Weekly Seasonality: Disabled")
-    print("   ├─ Pros: ✓ Robust, ✓ Auto changepoint detection, ✓ Handles missing data")
-    print("   └─ Cons: ✗ Slower training (Stan), ✗ May underestimate CI")
-
-    print("\n3️⃣  LSTM (Deep Learning)")
-    print("   ├─ Type: Recurrent Neural Network")
-    print("   ├─ Architecture: 32 LSTM cells → 16 Dense → 1 Output")
-    print("   ├─ Sequence Length: 4 timesteps")
-    print("   ├─ Pros: ✓ Learns complex patterns, ✓ No stationarity assumption, ✓ Flexible")
-    print("   └─ Cons: ✗ 'Black box', ✗ Needs more data (20+), ✗ Slower")
-
-    print(f"\n{'=' * 80}")
-    print("✨ ENSEMBLE APPROACH")
-    print(f"{'=' * 80}")
-    print("\nFormula: Ensemble = (SARMAX + Prophet + LSTM) / 3")
-    print("\nBenefits:")
-    print("  ✓ Reduces variance from individual model errors")
-    print("  ✓ More robust to model-specific failures")
-    print("  ✓ Captures strengths of all approaches")
-    print("  ✓ Better generalization than any single model")
-
-
 if __name__ == "__main__":
     total_started = time.perf_counter()
 
@@ -664,14 +649,7 @@ if __name__ == "__main__":
     if df_hist is None:
         exit(1)
 
-    print("\n" + "=" * 80)
-    print("🔮 MULTI-YEAR PREDICTION CONFIGURATION")
-    print("=" * 80)
-
     future_years = 1
-    print(f"\n📅 Predicting for {future_years} future year(s)")
-    print(f"   Models will generate {future_years * 3} semester-level predictions")
-
     gender_ratio_map = build_gender_ratio_map(df_hist)
 
     all_predictions = []
@@ -682,22 +660,7 @@ if __name__ == "__main__":
 
     save_predictions_to_db(all_predictions, future_years=future_years, gender_ratio_map=gender_ratio_map)
     save_model_metrics_to_db(all_predictions)
-    print_model_performance_summary(all_predictions)
-
-    print(f"\n\n{'=' * 80}")
-    print(f"✨ PREDICTION COMPLETE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'=' * 80}")
 
     successful = sum(1 for p in all_predictions if p is not None)
-    print(f"\n📊 Results Summary:")
-    print(f"   ✅ {successful}/{len(all_predictions)} programs processed successfully")
-    print(f"   📈 Total prediction rows saved: {successful * future_years * 3 * 4}")
-    print(f"   🤖 Model metrics saved: {successful * 3 * 6} (3 models × 6 metrics each)")
-    print(f"   ⏱️ Total runtime: {time.perf_counter() - total_started:.2f}s")
-
-    print(f"\n📱 Dashboard Access:")
-    print("   🌐 http://localhost/enrollment-tracker/dashboard.php?login=1")
-    print("   📌 Username: admin")
-    print("   🔐 Password: admin123")
-
-    print(f"\n{'=' * 80}\n")
+    print(f"\n✅ {successful}/{len(all_predictions)} programs processed successfully")
+    print(f"⏱️ Total runtime: {time.perf_counter() - total_started:.2f}s")
