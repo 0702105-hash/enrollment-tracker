@@ -248,7 +248,7 @@ class ProphetPredictor:
 
 
 class LSTMPredictor:
-    def __init__(self, sequence_length=4, lstm_units=32, epochs=100, batch_size=8):
+    def __init__(self, sequence_length=3, lstm_units=32, epochs=50, batch_size=4):
         self.sequence_length = sequence_length
         self.lstm_units = lstm_units
         self.epochs = epochs
@@ -276,7 +276,7 @@ class LSTMPredictor:
             X_train, y_train_seq = self.create_sequences(train_scaled)
             X_test, _ = self.create_sequences(test_scaled)
 
-            if len(X_train) < 2 or len(X_test) < 2:
+            if len(X_train) < 1 or len(X_test) < 1:
                 print("      ⚠️  Insufficient data for LSTM")
                 return False
 
@@ -289,24 +289,36 @@ class LSTMPredictor:
 
             self.model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
 
-            early_stop = EarlyStopping(
-                monitor='val_loss',
-                patience=10,
-                restore_best_weights=True
-            )
+            callbacks = []
+            if len(X_train) > 3:
+                early_stop = EarlyStopping(
+                    monitor='val_loss',
+                    patience=8,
+                    restore_best_weights=True
+                )
+                callbacks.append(early_stop)
 
-            history = self.model.fit(
-                X_train, y_train_seq,
-                epochs=self.epochs,
-                batch_size=self.batch_size,
-                validation_split=0.2,
-                callbacks=[early_stop],
-                verbose=0
-            )
+            fit_kwargs = {
+                'x': X_train,
+                'y': y_train_seq,
+                'epochs': self.epochs,
+                'batch_size': self.batch_size,
+                'callbacks': callbacks,
+                'verbose': 0
+            }
+
+            if len(X_train) > 3:
+                fit_kwargs['validation_split'] = 0.2
+
+            history = self.model.fit(**fit_kwargs)
 
             predictions_scaled = self.model.predict(X_test, verbose=0)
             predictions = self.scaler.inverse_transform(predictions_scaled)
             y_test_actual = y_test[self.sequence_length:]
+
+            if len(y_test_actual) == 0:
+                print("      ⚠️  Insufficient test targets for LSTM")
+                return False
 
             self.metrics = ModelEvaluator.calculate_metrics(y_test_actual, predictions.flatten())
 
@@ -328,6 +340,10 @@ class LSTMPredictor:
         try:
             y_hist_all = np.array(y_hist).reshape(-1, 1)
             scaled_hist = self.scaler.transform(y_hist_all)
+
+            if len(scaled_hist) < self.sequence_length:
+                print("      ⚠️  Not enough history for LSTM prediction")
+                return None
 
             current_seq = scaled_hist[-self.sequence_length:].reshape(1, self.sequence_length, 1)
             predictions = []
@@ -449,7 +465,8 @@ def predict_for_program(program_id, program_data, future_years=1):
         ModelEvaluator.print_metrics(prophet_pred['metrics'], "Prophet")
 
     print("\n   🔮 MODEL 3: LSTM (Neural Network)")
-    lstm_predictor = LSTMPredictor(sequence_length=max(1, min(4, len(y_train) // 2)))
+    lstm_seq_len = max(1, min(3, len(y_train) // 3 if len(y_train) >= 3 else 1))
+    lstm_predictor = LSTMPredictor(sequence_length=lstm_seq_len, epochs=50, batch_size=4)
     lstm_success = lstm_predictor.train(y_train, y_test)
     lstm_pred = lstm_predictor.predict(y, steps=steps) if lstm_success else None
     if lstm_pred and lstm_pred.get('metrics'):
