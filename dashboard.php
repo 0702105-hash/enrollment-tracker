@@ -320,12 +320,16 @@ tbody tr:hover{
 }
 
 .prediction-card{
-    background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
     color:white;
     border-radius:16px;
     padding:20px;
     box-shadow:0 8px 25px rgba(0,0,0,0.1);
 }
+
+.prediction-card.prophet{background:linear-gradient(135deg,#D81B60 0%,#AD1457 100%);}
+.prediction-card.lstm{background:linear-gradient(135deg,#FF6F00 0%,#EF6C00 100%);}
+.prediction-card.xgboost{background:linear-gradient(135deg,#6D4C41 0%,#4E342E 100%);}
+.prediction-card.ensemble{background:linear-gradient(135deg,#00897B 0%,#00695C 100%);}
 
 .prediction-card h4{
     margin-bottom:15px;
@@ -347,12 +351,13 @@ tbody tr:hover{
 
 .prediction-label{
     font-size:13px;
-    opacity:0.8;
+    opacity:0.85;
 }
 
 .prediction-value{
     font-weight:600;
     font-size:14px;
+    text-align:right;
 }
 
 .recent-item{
@@ -404,7 +409,7 @@ tbody tr:hover{
 
 .metrics-container{
     display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(350px,1fr));
+    grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
     gap:25px;
     margin-top:30px;
 }
@@ -417,9 +422,9 @@ tbody tr:hover{
     border-top:5px solid #2b6cb0;
 }
 
-.model-card.sarmax{border-top-color:#667eea;}
 .model-card.prophet{border-top-color:#f093fb;}
 .model-card.lstm{border-top-color:#ed8936;}
+.model-card.xgboost{border-top-color:#6D4C41;}
 
 .model-header{
     display:flex;
@@ -439,9 +444,9 @@ tbody tr:hover{
     text-transform:uppercase;
 }
 
-.model-badge.sarmax{background:#e6e6ff;color:#667eea;}
 .model-badge.prophet{background:#ffe6f5;color:#f093fb;}
 .model-badge.lstm{background:#fff5e6;color:#ed8936;}
+.model-badge.xgboost{background:#efebe9;color:#6D4C41;}
 
 .model-name{
     font-size:18px;
@@ -465,9 +470,9 @@ tbody tr:hover{
     gap:12px;
 }
 
-.metric-item.sarmax{border-left-color:#667eea;}
 .metric-item.prophet{border-left-color:#f093fb;}
 .metric-item.lstm{border-left-color:#ed8936;}
+.metric-item.xgboost{border-left-color:#6D4C41;}
 
 .metric-label{
     font-weight:600;
@@ -537,15 +542,6 @@ tbody tr:hover{
     margin:10px 0;
 }
 
-.metric-scale{
-    font-size:12px;
-    color:#718096;
-    margin-top:8px;
-    padding:8px;
-    background:white;
-    border-radius:6px;
-}
-
 .custom-legend{
     display:flex;
     flex-wrap:wrap;
@@ -600,6 +596,29 @@ tbody tr:hover{
 .prediction-compare-table tbody tr:hover{
     background:#f8fafc;
 }
+
+.available-models{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin:12px 0 0 0;
+}
+
+.model-pill{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 12px;
+    border-radius:999px;
+    font-size:13px;
+    font-weight:700;
+}
+
+.model-pill.prophet{background:#fde7f3;color:#D81B60;}
+.model-pill.lstm{background:#fff1e6;color:#FF6F00;}
+.model-pill.xgboost{background:#efebe9;color:#6D4C41;}
+.model-pill.ensemble{background:#e6fffa;color:#00897B;}
+.model-pill.missing{background:#edf2f7;color:#718096;}
 
 @media(max-width:768px){
     .programs-charts-grid{
@@ -812,6 +831,7 @@ tbody tr:hover{
             <div id="predictionChartContainer" class="card" style="margin-top:20px;display:none;">
                 <h3 id="predictionChartTitle"></h3>
                 <div id="predictionLegend" class="custom-legend" style="display:none;"></div>
+                <div id="availableModels" class="available-models" style="display:none;"></div>
                 <div class="chart-container">
                     <canvas id="predictionChart"></canvas>
                 </div>
@@ -824,9 +844,9 @@ tbody tr:hover{
                         <thead>
                             <tr>
                                 <th>Period</th>
-                                <th style="color:#5C6BC0;">SARMAX</th>
                                 <th style="color:#D81B60;">Prophet</th>
-                                <th style="color:#FB8C00;">LSTM</th>
+                                <th style="color:#FF6F00;">LSTM</th>
+                                <th style="color:#6D4C41;">XGBoost</th>
                                 <th style="color:#00897B;">Ensemble</th>
                             </tr>
                         </thead>
@@ -859,9 +879,9 @@ tbody tr:hover{
                     <thead>
                         <tr>
                             <th>Metric</th>
-                            <th style="color:#667eea;">SARMAX</th>
                             <th style="color:#f093fb;">Prophet</th>
                             <th style="color:#ed8936;">LSTM</th>
+                            <th style="color:#6D4C41;">XGBoost</th>
                             <th style="color:#2f855a;">Best Model</th>
                         </tr>
                     </thead>
@@ -1779,9 +1799,9 @@ class EnrollmentTracker{
 
     buildPredictionMap(predictions){
         const modelMap = {
-            SARMAX: {},
             Prophet: {},
             LSTM: {},
+            XGBoost: {},
             Ensemble: {}
         };
 
@@ -1801,12 +1821,30 @@ class EnrollmentTracker{
 
         legend.innerHTML = `
             <div class="legend-item"><span class="legend-line" style="background:#2E7D32;"></span>Historical Total</div>
-            <div class="legend-item"><span class="legend-line" style="background:#5C6BC0;"></span>SARMAX</div>
             <div class="legend-item"><span class="legend-line" style="background:#D81B60;"></span>Prophet</div>
-            <div class="legend-item"><span class="legend-line" style="background:#FB8C00;"></span>LSTM</div>
+            <div class="legend-item"><span class="legend-line" style="background:#FF6F00;"></span>LSTM</div>
+            <div class="legend-item"><span class="legend-line" style="background:#6D4C41;"></span>XGBoost</div>
             <div class="legend-item"><span class="legend-line" style="background:#00897B;"></span>Ensemble</div>
         `;
         legend.style.display = 'flex';
+    }
+
+    renderAvailableModels(modelMap){
+        const container = document.getElementById('availableModels');
+        if(!container) return;
+
+        const hasProphet = Object.keys(modelMap.Prophet || {}).length > 0;
+        const hasLstm = Object.keys(modelMap.LSTM || {}).length > 0;
+        const hasXgboost = Object.keys(modelMap.XGBoost || {}).length > 0;
+        const hasEnsemble = Object.keys(modelMap.Ensemble || {}).length > 0;
+
+        container.innerHTML = `
+            <span class="model-pill ${hasProphet ? 'prophet' : 'missing'}">${hasProphet ? '✓' : '—'} Prophet</span>
+            <span class="model-pill ${hasLstm ? 'lstm' : 'missing'}">${hasLstm ? '✓' : '—'} LSTM</span>
+            <span class="model-pill ${hasXgboost ? 'xgboost' : 'missing'}">${hasXgboost ? '✓' : '—'} XGBoost</span>
+            <span class="model-pill ${hasEnsemble ? 'ensemble' : 'missing'}">${hasEnsemble ? '✓' : '—'} Ensemble</span>
+        `;
+        container.style.display = 'flex';
     }
 
     refreshPredictions(){
@@ -1846,8 +1884,6 @@ class EnrollmentTracker{
         });
 
         const historicalLabels = historicalData.map(e=>`${e.academic_year} S${e.semester}`);
-        const historicalTotals = historicalData.map(e=>(parseInt(e.male)||0)+(parseInt(e.female)||0));
-
         const modelMap = this.buildPredictionMap(predictions);
         const predictionPeriods = [...new Set(predictions.map(p => `${p.academic_year} S${p.semester}`))];
 
@@ -1865,14 +1901,14 @@ class EnrollmentTracker{
             Object.prototype.hasOwnProperty.call(lookupMap, label) ? lookupMap[label] : null
         );
 
-        const sarmaxLookup = {};
         const prophetLookup = {};
         const lstmLookup = {};
+        const xgboostLookup = {};
         const ensembleLookup = {};
 
-        Object.entries(modelMap.SARMAX || {}).forEach(([k, v]) => sarmaxLookup[k] = parseInt(v.predicted_total)||0);
         Object.entries(modelMap.Prophet || {}).forEach(([k, v]) => prophetLookup[k] = parseInt(v.predicted_total)||0);
         Object.entries(modelMap.LSTM || {}).forEach(([k, v]) => lstmLookup[k] = parseInt(v.predicted_total)||0);
+        Object.entries(modelMap.XGBoost || {}).forEach(([k, v]) => xgboostLookup[k] = parseInt(v.predicted_total)||0);
         Object.entries(modelMap.Ensemble || {}).forEach(([k, v]) => ensembleLookup[k] = parseInt(v.predicted_total)||0);
 
         const ctx = document.getElementById('predictionChart');
@@ -1885,6 +1921,7 @@ class EnrollmentTracker{
         const programName = programNames[programId] || `Program ${programId}`;
         document.getElementById('predictionChartTitle').textContent = `${programName} - Historical & Algorithm Predictions`;
         this.renderPredictionLegend();
+        this.renderAvailableModels(modelMap);
 
         this.predictionChart = new Chart(ctx, {
             type: 'line',
@@ -1899,47 +1936,77 @@ class EnrollmentTracker{
                         borderWidth: 4,
                         fill: false,
                         tension: 0.3,
-                        pointRadius: 5
-                    },
-                    {
-                        label: 'SARMAX',
-                        data: makeSeries(sarmaxLookup),
-                        borderColor: '#5C6BC0',
-                        borderWidth: 3,
-                        borderDash: [8,5],
-                        fill: false,
-                        tension: 0.3,
-                        pointRadius: 4
+                        pointRadius: 5,
+                        pointHoverRadius: 7,
+                        pointBackgroundColor: '#2E7D32',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        spanGaps: true
                     },
                     {
                         label: 'Prophet',
                         data: makeSeries(prophetLookup),
                         borderColor: '#D81B60',
-                        borderWidth: 3,
+                        backgroundColor: 'rgba(216,27,96,0.12)',
+                        borderWidth: 2,
                         borderDash: [4,4],
                         fill: false,
                         tension: 0.3,
-                        pointRadius: 4
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        pointBackgroundColor: '#D81B60',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 1,
+                        spanGaps: true
                     },
                     {
                         label: 'LSTM',
                         data: makeSeries(lstmLookup),
-                        borderColor: '#FB8C00',
-                        borderWidth: 3,
-                        borderDash: [2,6],
+                        borderColor: '#FF6F00',
+                        backgroundColor: 'rgba(255,111,0,0.18)',
+                        borderWidth: 5,
+                        borderDash: [],
                         fill: false,
                         tension: 0.3,
-                        pointRadius: 4
+                        pointRadius: 6,
+                        pointHoverRadius: 8,
+                        pointBackgroundColor: '#FF6F00',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        spanGaps: true,
+                        order: 1
+                    },
+                    {
+                        label: 'XGBoost',
+                        data: makeSeries(xgboostLookup),
+                        borderColor: '#6D4C41',
+                        backgroundColor: 'rgba(109,76,65,0.14)',
+                        borderWidth: 3,
+                        borderDash: [3,3],
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#6D4C41',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 1,
+                        spanGaps: true
                     },
                     {
                         label: 'Ensemble',
                         data: makeSeries(ensembleLookup),
                         borderColor: '#00897B',
-                        borderWidth: 4,
+                        backgroundColor: 'rgba(0,137,123,0.12)',
+                        borderWidth: 3,
                         borderDash: [10,5],
                         fill: false,
                         tension: 0.3,
-                        pointRadius: 5
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#00897B',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 1,
+                        spanGaps: true
                     }
                 ]
             },
@@ -1952,6 +2019,10 @@ class EnrollmentTracker{
                     },
                     legend: {
                         display: false
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false
                     }
                 },
                 interaction: {
@@ -1989,9 +2060,9 @@ class EnrollmentTracker{
         tbody.innerHTML = periods.map(period => `
             <tr>
                 <td><strong>${period}</strong></td>
-                <td>${modelMap.SARMAX?.[period]?.predicted_total ?? '—'}</td>
                 <td>${modelMap.Prophet?.[period]?.predicted_total ?? '—'}</td>
                 <td>${modelMap.LSTM?.[period]?.predicted_total ?? '—'}</td>
+                <td>${modelMap.XGBoost?.[period]?.predicted_total ?? '—'}</td>
                 <td>${modelMap.Ensemble?.[period]?.predicted_total ?? '—'}</td>
             </tr>
         `).join('');
@@ -2011,35 +2082,40 @@ class EnrollmentTracker{
 
         const semesterMap = {1:'First',2:'Second',3:'Summer'};
 
-        grid.innerHTML = predictions.map(p => `
-            <div class="prediction-card">
-                <h4>${programNames[p.program_id] || p.program_id}</h4>
-                <div class="prediction-item">
-                    <span class="prediction-label">Algorithm</span>
-                    <span class="prediction-value">${p.model_name || 'Ensemble'}</span>
+        grid.innerHTML = predictions.map(p => {
+            const modelName = p.model_name || 'Ensemble';
+            const modelClass = String(modelName).toLowerCase();
+
+            return `
+                <div class="prediction-card ${modelClass}">
+                    <h4>${programNames[p.program_id] || p.program_id}</h4>
+                    <div class="prediction-item">
+                        <span class="prediction-label">Algorithm</span>
+                        <span class="prediction-value">${modelName}</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span class="prediction-label">Academic Year</span>
+                        <span class="prediction-value">${p.academic_year}</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span class="prediction-label">Semester</span>
+                        <span class="prediction-value">${semesterMap[p.semester] || p.semester}</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span class="prediction-label">Predicted Total</span>
+                        <span class="prediction-value">${p.predicted_total}</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span class="prediction-label">Male / Female</span>
+                        <span class="prediction-value">${p.predicted_male || '—'} / ${p.predicted_female || '—'}</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span class="prediction-label">Confidence</span>
+                        <span class="prediction-value">${p.confidence ? (p.confidence * 100).toFixed(0) + '%' : '—'}</span>
+                    </div>
                 </div>
-                <div class="prediction-item">
-                    <span class="prediction-label">Academic Year</span>
-                    <span class="prediction-value">${p.academic_year}</span>
-                </div>
-                <div class="prediction-item">
-                    <span class="prediction-label">Semester</span>
-                    <span class="prediction-value">${semesterMap[p.semester] || p.semester}</span>
-                </div>
-                <div class="prediction-item">
-                    <span class="prediction-label">Predicted Total</span>
-                    <span class="prediction-value">${p.predicted_total}</span>
-                </div>
-                <div class="prediction-item">
-                    <span class="prediction-label">Male / Female</span>
-                    <span class="prediction-value">${p.predicted_male || '—'} / ${p.predicted_female || '—'}</span>
-                </div>
-                <div class="prediction-item">
-                    <span class="prediction-label">Confidence</span>
-                    <span class="prediction-value">${p.confidence ? (p.confidence * 100).toFixed(0) + '%' : '—'}</span>
-                </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         container.style.display = 'block';
     }
@@ -2079,7 +2155,7 @@ class EnrollmentTracker{
 
     displayCommonMetrics(byModel) {
         const commonMetrics = ['MAE', 'RMSE', 'MAPE', 'R²', 'RMSLE', 'Theil_U'];
-        const models = ['SARMAX', 'Prophet', 'LSTM'];
+        const models = ['Prophet', 'LSTM', 'XGBoost'];
         
         let html = '';
         commonMetrics.forEach(metric => {
@@ -2111,7 +2187,7 @@ class EnrollmentTracker{
     displayModelCards(byModel) {
         let html = '';
 
-        ['SARMAX', 'Prophet', 'LSTM'].forEach(modelName => {
+        ['Prophet', 'LSTM', 'XGBoost'].forEach(modelName => {
             const modelClass = modelName.toLowerCase();
             const metrics = byModel[modelName] || {};
             

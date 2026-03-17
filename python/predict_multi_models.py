@@ -1,33 +1,32 @@
 #!/usr/bin/env python3
 """
 Multi-Model Enrollment Prediction System
-Supports: SARMAX, Facebook Prophet, and LSTM
+Supports: Facebook Prophet, LSTM, and XGBoost
 Generates predictions for multiple future years with comprehensive evaluation metrics
 Saves per-model predictions and metrics for dashboard visualization.
 """
 
 import time
+import warnings
 
 import mysql.connector
 import numpy as np
 import pandas as pd
-import warnings
 
 warnings.filterwarnings('ignore')
 
 from prophet import Prophet
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import MinMaxScaler
-from statsmodels.stats.diagnostic import acorr_ljungbox
-from statsmodels.tsa.statespace.sarimax import SARIMAX
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
+from xgboost import XGBRegressor
 
 print("=" * 80)
 print("🔮 MULTI-MODEL ENROLLMENT PREDICTION SYSTEM (2026-2027+)")
-print("Models: SARMAX | Facebook Prophet | LSTM")
+print("Models: Facebook Prophet | LSTM | XGBoost")
 print("=" * 80)
 
 DB_CONFIG = {
@@ -64,6 +63,17 @@ class ModelEvaluator:
         y_pred = np.array(y_pred, dtype=float)
         y_pred = np.maximum(y_pred, 0)
 
+        if len(y_true) == 0 or len(y_pred) == 0:
+            return {
+                'MAE': np.nan,
+                'RMSE': np.nan,
+                'MAPE': np.nan,
+                'MSE': np.nan,
+                'R²': np.nan,
+                'RMSLE': np.nan,
+                'Theil_U': np.nan
+            }
+
         mae = mean_absolute_error(y_true, y_pred)
         mse = mean_squared_error(y_true, y_pred)
         rmse = np.sqrt(mse)
@@ -79,8 +89,8 @@ class ModelEvaluator:
         except Exception:
             r2 = np.nan
 
-        log_true = np.log1p(y_true)
-        log_pred = np.log1p(y_pred)
+        log_true = np.log1p(np.maximum(y_true, 0))
+        log_pred = np.log1p(np.maximum(y_pred, 0))
         rmsle = np.sqrt(mean_squared_error(log_true, log_pred))
 
         if len(y_true) > 1:
@@ -107,78 +117,6 @@ class ModelEvaluator:
             print(f"      {key:<16}: {value}")
 
 
-class SARMAXPredictor:
-    def __init__(self, order=(1, 1, 1), seasonal_order=(1, 1, 1, 3)):
-        self.order = order
-        self.seasonal_order = seasonal_order
-        self.model = None
-        self.fitted_model = None
-        self.metrics = {}
-
-    def train(self, y_train, y_test):
-        print("      🔧 Training SARMAX model...")
-        try:
-            self.model = SARIMAX(
-                y_train,
-                order=self.order,
-                seasonal_order=self.seasonal_order,
-                enforce_stationarity=False,
-                enforce_invertibility=False
-            )
-            self.fitted_model = self.model.fit(disp=False, maxiter=500)
-
-            forecast = self.fitted_model.get_forecast(steps=len(y_test))
-            predictions = np.array(forecast.predicted_mean)
-
-            self.metrics = ModelEvaluator.calculate_metrics(y_test, predictions)
-
-            try:
-                residuals = np.array(y_train) - np.array(self.fitted_model.fittedvalues)
-                lag_count = min(10, max(1, len(residuals) - 1))
-                lb_test = acorr_ljungbox(residuals, lags=lag_count, return_df=True)
-
-                if is_valid_metric_value(self.fitted_model.aic):
-                    self.metrics['AIC'] = round(float(self.fitted_model.aic), 2)
-                else:
-                    self.metrics['AIC'] = np.nan
-
-                if is_valid_metric_value(self.fitted_model.bic):
-                    self.metrics['BIC'] = round(float(self.fitted_model.bic), 2)
-                else:
-                    self.metrics['BIC'] = np.nan
-
-                lb_pvalue = lb_test.iloc[-1, 1]
-                self.metrics['Ljung_Box_Pvalue'] = round(float(lb_pvalue), 4) if is_valid_metric_value(lb_pvalue) else np.nan
-            except Exception:
-                self.metrics.setdefault('AIC', np.nan)
-                self.metrics.setdefault('BIC', np.nan)
-                self.metrics.setdefault('Ljung_Box_Pvalue', np.nan)
-
-            return True
-        except Exception as e:
-            print(f"      ❌ SARMAX training error: {str(e)}")
-            return False
-
-    def predict(self, steps=1):
-        if self.fitted_model is None:
-            return None
-
-        try:
-            forecast = self.fitted_model.get_forecast(steps=steps)
-            predictions = np.array(forecast.predicted_mean)
-            conf_int = np.asarray(forecast.conf_int())
-
-            return {
-                'predictions': np.maximum(predictions, 0),
-                'lower_ci': np.maximum(conf_int[:, 0], 0),
-                'upper_ci': np.maximum(conf_int[:, 1], 0),
-                'metrics': self.metrics
-            }
-        except Exception as e:
-            print(f"      ❌ SARMAX prediction error: {str(e)}")
-            return None
-
-
 class ProphetPredictor:
     def __init__(self, yearly_seasonality=False, weekly_seasonality=False):
         self.yearly_seasonality = yearly_seasonality
@@ -200,7 +138,8 @@ class ProphetPredictor:
             self.model = Prophet(
                 yearly_seasonality=self.yearly_seasonality,
                 weekly_seasonality=self.weekly_seasonality,
-                interval_width=0.95
+                interval_width=0.95,
+                stan_backend='CMDSTANPY'
             )
             self.model.fit(train_df)
 
@@ -369,6 +308,105 @@ class LSTMPredictor:
             return None
 
 
+class XGBoostPredictor:
+    def __init__(self, n_lags=3):
+        self.n_lags = n_lags
+        self.model = None
+        self.metrics = {}
+        self.history_values = None
+
+    def create_supervised(self, values):
+        X, y = [], []
+        for i in range(self.n_lags, len(values)):
+            X.append(values[i - self.n_lags:i])
+            y.append(values[i])
+        return np.array(X), np.array(y)
+
+    def train(self, y_train, y_test):
+        print("      🔧 Training XGBoost model...")
+        try:
+            full_series = np.concatenate([y_train, y_test]).astype(float)
+            effective_lags = min(self.n_lags, max(1, len(y_train) - 1))
+            self.n_lags = effective_lags
+
+            rolling_test_predictions = []
+            rolling_history = list(y_train.astype(float))
+
+            for actual in y_test:
+                X_roll, y_roll = self.create_supervised(np.array(rolling_history, dtype=float))
+                if len(X_roll) < 1:
+                    print("      ⚠️  Insufficient data for XGBoost")
+                    return False
+
+                model = XGBRegressor(
+                    n_estimators=100,
+                    max_depth=3,
+                    learning_rate=0.05,
+                    subsample=0.9,
+                    colsample_bytree=0.9,
+                    objective='reg:squarederror',
+                    random_state=42
+                )
+                model.fit(X_roll, y_roll)
+
+                x_input = np.array(rolling_history[-self.n_lags:], dtype=float).reshape(1, -1)
+                pred = model.predict(x_input)[0]
+                rolling_test_predictions.append(pred)
+                rolling_history.append(float(actual))
+
+            self.metrics = ModelEvaluator.calculate_metrics(y_test, np.array(rolling_test_predictions))
+            self.history_values = full_series.copy()
+
+            self.model = XGBRegressor(
+                n_estimators=100,
+                max_depth=3,
+                learning_rate=0.05,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                objective='reg:squarederror',
+                random_state=42
+            )
+
+            X_full, y_full = self.create_supervised(full_series)
+            if len(X_full) < 1:
+                print("      ⚠️  Insufficient data for final XGBoost fit")
+                return False
+
+            self.model.fit(X_full, y_full)
+            return True
+
+        except Exception as e:
+            print(f"      ❌ XGBoost training error: {str(e)}")
+            return False
+
+    def predict(self, y_hist, steps=1):
+        if self.model is None:
+            return None
+
+        try:
+            history = list(np.array(y_hist, dtype=float))
+            if len(history) < self.n_lags:
+                return None
+
+            predictions = []
+            for _ in range(steps):
+                x_input = np.array(history[-self.n_lags:], dtype=float).reshape(1, -1)
+                pred = self.model.predict(x_input)[0]
+                pred = max(float(pred), 0)
+                predictions.append(pred)
+                history.append(pred)
+
+            return {
+                'predictions': np.array(predictions, dtype=float),
+                'lower_ci': None,
+                'upper_ci': None,
+                'metrics': self.metrics
+            }
+        except Exception as e:
+            print(f"      ❌ XGBoost prediction error: {str(e)}")
+            return None
+
+
 def load_enrollment_data():
     print("\n📂 Loading historical data...")
     started = time.perf_counter()
@@ -409,20 +447,11 @@ def build_gender_ratio_map(df_hist):
 def get_model_confidence(pred_result):
     models_r2 = []
 
-    if pred_result.get('sarmax') and pred_result['sarmax'].get('metrics'):
-        r2 = pred_result['sarmax']['metrics'].get('R²', 0)
-        if is_valid_metric_value(r2):
-            models_r2.append(max(float(r2), 0))
-
-    if pred_result.get('prophet') and pred_result['prophet'].get('metrics'):
-        r2 = pred_result['prophet']['metrics'].get('R²', 0)
-        if is_valid_metric_value(r2):
-            models_r2.append(max(float(r2), 0))
-
-    if pred_result.get('lstm') and pred_result['lstm'].get('metrics'):
-        r2 = pred_result['lstm']['metrics'].get('R²', 0)
-        if is_valid_metric_value(r2):
-            models_r2.append(max(float(r2), 0))
+    for key in ['prophet', 'lstm', 'xgboost']:
+        if pred_result.get(key) and pred_result[key].get('metrics'):
+            r2 = pred_result[key]['metrics'].get('R²', 0)
+            if is_valid_metric_value(r2):
+                models_r2.append(max(float(r2), 0))
 
     return float(np.mean(models_r2)) if models_r2 else 0.5
 
@@ -450,21 +479,14 @@ def predict_for_program(program_id, program_data, future_years=1):
 
     steps = future_years * 3
 
-    print("\n   🔮 MODEL 1: SARMAX (Seasonal ARIMA)")
-    sarmax_predictor = SARMAXPredictor()
-    sarmax_success = sarmax_predictor.train(y_train, y_test)
-    sarmax_pred = sarmax_predictor.predict(steps=steps) if sarmax_success else None
-    if sarmax_pred and sarmax_pred.get('metrics'):
-        ModelEvaluator.print_metrics(sarmax_pred['metrics'], "SARMAX")
-
-    print("\n   🔮 MODEL 2: Facebook Prophet")
+    print("\n   🔮 MODEL 1: Facebook Prophet")
     prophet_predictor = ProphetPredictor()
     prophet_success = prophet_predictor.train(y_train, y_test)
     prophet_pred = prophet_predictor.predict(steps=steps) if prophet_success else None
     if prophet_pred and prophet_pred.get('metrics'):
         ModelEvaluator.print_metrics(prophet_pred['metrics'], "Prophet")
 
-    print("\n   🔮 MODEL 3: LSTM (Neural Network)")
+    print("\n   🔮 MODEL 2: LSTM (Neural Network)")
     lstm_seq_len = max(1, min(3, len(y_train) // 3 if len(y_train) >= 3 else 1))
     lstm_predictor = LSTMPredictor(sequence_length=lstm_seq_len, epochs=50, batch_size=4)
     lstm_success = lstm_predictor.train(y_train, y_test)
@@ -472,10 +494,17 @@ def predict_for_program(program_id, program_data, future_years=1):
     if lstm_pred and lstm_pred.get('metrics'):
         ModelEvaluator.print_metrics(lstm_pred['metrics'], "LSTM")
 
+    print("\n   🔮 MODEL 3: XGBoost")
+    xgb_predictor = XGBoostPredictor(n_lags=min(3, max(1, len(y_train) - 1)))
+    xgb_success = xgb_predictor.train(y_train, y_test)
+    xgb_pred = xgb_predictor.predict(y, steps=steps) if xgb_success else None
+    if xgb_pred and xgb_pred.get('metrics'):
+        ModelEvaluator.print_metrics(xgb_pred['metrics'], "XGBoost")
+
     predictions_list = [
-        sarmax_pred['predictions'] if sarmax_pred else None,
         prophet_pred['predictions'] if prophet_pred else None,
-        lstm_pred['predictions'] if lstm_pred else None
+        lstm_pred['predictions'] if lstm_pred else None,
+        xgb_pred['predictions'] if xgb_pred else None
     ]
     valid_predictions = [p for p in predictions_list if p is not None]
 
@@ -488,18 +517,18 @@ def predict_for_program(program_id, program_data, future_years=1):
     return {
         'program_id': program_id,
         'program_name': PROGRAM_NAMES.get(program_id, f'Program {program_id}'),
-        'sarmax': sarmax_pred,
         'prophet': prophet_pred,
         'lstm': lstm_pred,
+        'xgboost': xgb_pred,
         'ensemble': {
             'predictions': np.maximum(ensemble_pred, 0),
             'lower_ci': None,
             'upper_ci': None,
             'metrics': {
                 'R²': get_model_confidence({
-                    'sarmax': sarmax_pred,
                     'prophet': prophet_pred,
-                    'lstm': lstm_pred
+                    'lstm': lstm_pred,
+                    'xgboost': xgb_pred
                 })
             }
         },
@@ -514,9 +543,9 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio):
     inserted_count = 0
 
     model_map = {
-        'SARMAX': pred_result.get('sarmax'),
         'Prophet': pred_result.get('prophet'),
         'LSTM': pred_result.get('lstm'),
+        'XGBoost': pred_result.get('xgboost'),
         'Ensemble': pred_result.get('ensemble')
     }
 
@@ -548,7 +577,7 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio):
                 pred_male,
                 pred_female,
                 confidence,
-                'SARMAX+Prophet+LSTM',
+                'Prophet+LSTM+XGBoost',
                 model_name
             ))
             inserted_count += 1
@@ -623,7 +652,11 @@ def save_model_metrics_to_db(all_predictions):
             program_id = pred_result['program_id']
             prediction_year = f"{2026}-{2026 + pred_result['future_years'] - 1}"
 
-            for model_name, model_key in [('SARMAX', 'sarmax'), ('Prophet', 'prophet'), ('LSTM', 'lstm')]:
+            for model_name, model_key in [
+                ('Prophet', 'prophet'),
+                ('LSTM', 'lstm'),
+                ('XGBoost', 'xgboost')
+            ]:
                 model_result = pred_result.get(model_key)
                 if model_result and model_result.get('metrics'):
                     for metric_name, metric_value in model_result['metrics'].items():
