@@ -536,11 +536,80 @@ def predict_for_program(program_id, program_data, future_years=1):
     }
 
 
-def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio):
+def get_table_columns(cursor, table_name):
+    cursor.execute("""
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = %s
+    """, (table_name,))
+    return {row[0] for row in cursor.fetchall()}
+
+
+def ensure_predictions_schema(cursor):
+    columns = get_table_columns(cursor, 'predictions')
+
+    if 'model_ensemble' not in columns:
+        cursor.execute("""
+            ALTER TABLE predictions
+            ADD COLUMN model_ensemble VARCHAR(255) DEFAULT 'Prophet+LSTM+XGBoost'
+        """)
+
+    if 'model_name' not in columns:
+        cursor.execute("""
+            ALTER TABLE predictions
+            ADD COLUMN model_name VARCHAR(50) DEFAULT 'Ensemble'
+        """)
+
+    cursor.execute("SHOW INDEX FROM predictions")
+    index_rows = cursor.fetchall()
+
+    index_map = {}
+    for row in index_rows:
+        key_name = row[2]
+        non_unique = row[1]
+        seq_in_index = int(row[3])
+        column_name = row[4]
+
+        if key_name not in index_map:
+            index_map[key_name] = {
+                'non_unique': non_unique,
+                'columns': {}
+            }
+
+        index_map[key_name]['columns'][seq_in_index] = column_name
+
+    for key_name, meta in index_map.items():
+        if meta['non_unique'] != 0:
+            continue
+
+        ordered_cols = [meta['columns'][k] for k in sorted(meta['columns'])]
+        if ordered_cols == ['program_id', 'academic_year', 'semester']:
+            cursor.execute(f"ALTER TABLE predictions DROP INDEX {key_name}")
+
+    has_target_unique = False
+    for meta in index_map.values():
+        if meta['non_unique'] != 0:
+            continue
+        ordered_cols = [meta['columns'][k] for k in sorted(meta['columns'])]
+        if ordered_cols == ['program_id', 'academic_year', 'semester', 'model_name']:
+            has_target_unique = True
+            break
+
+    if not has_target_unique:
+        cursor.execute("""
+            ALTER TABLE predictions
+            ADD UNIQUE KEY uk_program_pred_sem_model (program_id, academic_year, semester, model_name)
+        """)
+
+
+def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, predictions_columns):
     program_id = int(pred_result['program_id'])
     confidence = get_model_confidence(pred_result)
     base_year = 2026
     inserted_count = 0
+    has_model_name = 'model_name' in predictions_columns
+    has_model_ensemble = 'model_ensemble' in predictions_columns
 
     model_map = {
         'Prophet': pred_result.get('prophet'),
@@ -548,6 +617,10 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio):
         'XGBoost': pred_result.get('xgboost'),
         'Ensemble': pred_result.get('ensemble')
     }
+
+    # Older schemas don't include model_name, so store only ensemble rows to avoid insert errors.
+    if not has_model_name:
+        model_map = {'Ensemble': pred_result.get('ensemble')}
 
     for model_name, model_result in model_map.items():
         if not model_result or model_result.get('predictions') is None:
@@ -564,22 +637,40 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio):
             pred_male = int(pred_total * avg_male_ratio)
             pred_female = pred_total - pred_male
 
-            cursor.execute("""
-                INSERT INTO predictions
-                (program_id, academic_year, semester, predicted_total,
-                 predicted_male, predicted_female, confidence, model_ensemble, model_name)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
+            columns = [
+                'program_id',
+                'academic_year',
+                'semester',
+                'predicted_total',
+                'predicted_male',
+                'predicted_female',
+                'confidence'
+            ]
+            values = [
                 program_id,
                 academic_year,
                 int(sem),
                 pred_total,
                 pred_male,
                 pred_female,
-                confidence,
-                'Prophet+LSTM+XGBoost',
-                model_name
-            ))
+                confidence
+            ]
+
+            if has_model_ensemble:
+                columns.append('model_ensemble')
+                values.append('Prophet+LSTM+XGBoost')
+
+            if has_model_name:
+                columns.append('model_name')
+                values.append(model_name)
+
+            placeholders = ', '.join(['%s'] * len(values))
+            columns_sql = ', '.join(columns)
+
+            cursor.execute(
+                f"INSERT INTO predictions ({columns_sql}) VALUES ({placeholders})",
+                tuple(values)
+            )
             inserted_count += 1
 
     return inserted_count
@@ -596,6 +687,9 @@ def save_predictions_to_db(all_predictions, future_years=1, gender_ratio_map=Non
     cursor = conn.cursor()
 
     try:
+        ensure_predictions_schema(cursor)
+        predictions_columns = get_table_columns(cursor, 'predictions')
+
         for year_offset in range(future_years):
             target_year = 2026 + year_offset
             cursor.execute(f"DELETE FROM predictions WHERE academic_year LIKE '{target_year}-%'")
@@ -616,7 +710,8 @@ def save_predictions_to_db(all_predictions, future_years=1, gender_ratio_map=Non
                 cursor=cursor,
                 pred_result=pred_result,
                 future_years=future_years,
-                avg_male_ratio=avg_male_ratio
+                avg_male_ratio=avg_male_ratio,
+                predictions_columns=predictions_columns
             )
 
         conn.commit()

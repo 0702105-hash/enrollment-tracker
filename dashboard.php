@@ -22,6 +22,103 @@ body{
     padding:30px 20px;
 }
 
+.dashboard-layout{
+    display:grid;
+    grid-template-columns:280px minmax(0,1fr);
+    gap:25px;
+    align-items:start;
+}
+
+.dashboard-layout.collapsed{
+    grid-template-columns:84px minmax(0,1fr);
+}
+
+.dashboard-topbar{
+    display:none;
+    justify-content:flex-start;
+    align-items:center;
+    margin-bottom:14px;
+}
+
+.nav-toggle{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    background:#2b6cb0;
+    color:#fff;
+    border:none;
+    border-radius:12px;
+    cursor:pointer;
+    font-weight:700;
+    padding:10px 14px;
+    line-height:1;
+}
+
+.nav-toggle:hover{
+    background:#2c5282;
+}
+
+.nav-toggle .icon{
+    font-size:16px;
+}
+
+.nav-toggle .label{
+    font-size:13px;
+}
+
+.nav-overlay{
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,0.4);
+    z-index:900;
+}
+
+.nav-overlay.active{
+    display:block;
+}
+
+.side-nav{
+    position:sticky;
+    top:20px;
+    padding:20px;
+    transition:padding .25s ease;
+    z-index:1001;
+}
+
+.side-nav h3{
+    margin-bottom:14px;
+    font-size:14px;
+    color:#718096;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+}
+
+.side-nav-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:10px;
+}
+
+.side-nav-toggle{
+    width:36px;
+    height:36px;
+    padding:0;
+    border-radius:10px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size:16px;
+    flex-shrink:0;
+}
+
+.main-panel{
+    min-width:0;
+}
+
 .header-banner{
     background:linear-gradient(135deg,#2f855a,#2c5282);
     color:white;
@@ -81,6 +178,64 @@ body{
 .tab-btn.active{
     color:#2b6cb0;
     border-bottom-color:#2b6cb0;
+}
+
+.side-nav .tabs{
+    flex-direction:column;
+    gap:6px;
+    border-bottom:none;
+    margin-bottom:0;
+    overflow:visible;
+}
+
+.tab-btn .tab-icon{
+    display:inline-block;
+    width:24px;
+    text-align:center;
+    margin-right:8px;
+}
+
+.tab-btn .tab-text{
+    display:inline;
+}
+
+.side-nav .tab-btn{
+    width:100%;
+    text-align:left;
+    border-bottom:none;
+    border-left:4px solid transparent;
+    border-radius:10px;
+    background:#f8fafc;
+    color:#4a5568;
+}
+
+.side-nav .tab-btn:hover{
+    background:#edf2f7;
+    color:#2d3748;
+}
+
+.side-nav .tab-btn.active{
+    border-left-color:#2b6cb0;
+    background:#ebf8ff;
+    color:#2b6cb0;
+}
+
+.dashboard-layout.collapsed .side-nav{
+    padding:14px 10px;
+}
+
+.dashboard-layout.collapsed .side-nav-header h3,
+.dashboard-layout.collapsed .tab-btn .tab-text{
+    display:none;
+}
+
+.dashboard-layout.collapsed .side-nav .tab-btn{
+    justify-content:center;
+    padding:12px 10px;
+}
+
+.dashboard-layout.collapsed .tab-btn .tab-icon{
+    margin-right:0;
 }
 
 .tab-content{
@@ -621,6 +776,78 @@ tbody tr:hover{
 .model-pill.missing{background:#edf2f7;color:#718096;}
 
 @media(max-width:768px){
+    .dashboard-topbar{
+        display:flex;
+    }
+
+    .dashboard-layout{
+        grid-template-columns:1fr;
+    }
+
+    .dashboard-layout.collapsed{
+        grid-template-columns:1fr;
+    }
+
+    .side-nav{
+        position:fixed;
+        top:0;
+        left:0;
+        bottom:0;
+        width:min(84vw,320px);
+        border-radius:0;
+        margin:0;
+        transform:translateX(-110%);
+        transition:transform .25s ease;
+        overflow:auto;
+        box-shadow:0 10px 30px rgba(0,0,0,0.2);
+    }
+
+    .side-nav.open{
+        transform:translateX(0);
+    }
+
+    .side-nav h3{
+        margin-bottom:10px;
+    }
+
+    .side-nav-toggle{
+        display:none;
+    }
+
+    .side-nav .tabs{
+        flex-direction:column;
+        overflow:visible;
+        gap:6px;
+        padding-bottom:0;
+    }
+
+    .side-nav .tab-btn{
+        width:100%;
+        min-width:0;
+        border-left:4px solid transparent;
+        border-bottom:none;
+        background:#f8fafc;
+    }
+
+    .side-nav .tab-btn.active{
+        border-left-color:#2b6cb0;
+        border-bottom:none;
+    }
+
+    .dashboard-layout.collapsed .side-nav-header h3,
+    .dashboard-layout.collapsed .tab-btn .tab-text{
+        display:inline;
+    }
+
+    .dashboard-layout.collapsed .side-nav .tab-btn{
+        justify-content:flex-start;
+        padding:12px 18px;
+    }
+
+    .dashboard-layout.collapsed .tab-btn .tab-icon{
+        margin-right:8px;
+    }
+
     .programs-charts-grid{
         grid-template-columns:1fr;
     }
@@ -671,16 +898,31 @@ tbody tr:hover{
         <p>Charts, predictions, and evaluation metrics</p>
     </div>
 
-    <div class="card">
-        <div class="tabs">
-            <button class="tab-btn active" data-tab="overview">📊 Overview</button>
-            <button class="tab-btn" data-tab="enrollments">👥 Enrollments</button>
-            <button class="tab-btn" data-tab="add-enrollment">➕ Add Enrollment</button>
-            <button class="tab-btn" data-tab="predictions">🔮 Predictions</button>
-            <button class="tab-btn" data-tab="evaluation">📈 Evaluation</button>
-        </div>
+    <div class="dashboard-topbar">
+        <button id="mobileNavToggle" class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false">
+            <span class="icon">☰</span>
+            <span class="label">Menu</span>
+        </button>
     </div>
 
+    <div id="navOverlay" class="nav-overlay"></div>
+
+    <div class="dashboard-layout">
+        <aside id="sideNav" class="card side-nav">
+            <div class="side-nav-header">
+                <h3>Dashboard Menu</h3>
+                <button id="desktopNavToggle" class="side-nav-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true">◀</button>
+            </div>
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="overview"><span class="tab-icon">📊</span><span class="tab-text">Overview</span></button>
+                <button class="tab-btn" data-tab="enrollments"><span class="tab-icon">👥</span><span class="tab-text">Enrollments</span></button>
+                <button class="tab-btn" data-tab="add-enrollment"><span class="tab-icon">➕</span><span class="tab-text">Add Enrollment</span></button>
+                <button class="tab-btn" data-tab="predictions"><span class="tab-icon">🔮</span><span class="tab-text">Predictions</span></button>
+                <button class="tab-btn" data-tab="evaluation"><span class="tab-icon">📈</span><span class="tab-text">Evaluation</span></button>
+            </div>
+        </aside>
+
+        <main class="main-panel">
     <div id="overview" class="tab-content active">
         <div class="summary-grid" id="summaryGrid"></div>
 
@@ -910,6 +1152,9 @@ tbody tr:hover{
         </div>
     </div>
 
+        </main>
+    </div>
+
 </div>
 
 <?php endif; ?>
@@ -983,6 +1228,7 @@ class EnrollmentTracker{
         this.editingRecord = null;
         this.sortColumn = null;
         this.sortDirection = 'asc';
+        this.navCollapsed = false;
         this.init();
     }
 
@@ -991,6 +1237,7 @@ class EnrollmentTracker{
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('dashboard').style.display='block';
             this.setupTabs();
+            this.setupSideNav();
             this.loadPrograms();
             this.bindEvents();
             this.setupEnrollmentsSorting();
@@ -1022,8 +1269,77 @@ class EnrollmentTracker{
                     this.loadAllProgramsCharts();
                     this.refreshCombinedChart();
                 }
+
+                if(window.matchMedia('(max-width: 768px)').matches){
+                    this.closeMobileNav();
+                }
             });
         });
+    }
+
+    setupSideNav(){
+        this.layoutEl = document.querySelector('.dashboard-layout');
+        this.sideNavEl = document.getElementById('sideNav');
+        this.navOverlayEl = document.getElementById('navOverlay');
+        this.desktopNavToggleEl = document.getElementById('desktopNavToggle');
+        this.mobileNavToggleEl = document.getElementById('mobileNavToggle');
+
+        this.desktopNavToggleEl?.addEventListener('click', () => this.toggleDesktopNav());
+        this.mobileNavToggleEl?.addEventListener('click', () => this.toggleMobileNav());
+        this.navOverlayEl?.addEventListener('click', () => this.closeMobileNav());
+
+        window.addEventListener('resize', () => this.handleNavResize());
+        this.handleNavResize();
+    }
+
+    toggleDesktopNav(){
+        if(!this.layoutEl || window.matchMedia('(max-width: 768px)').matches) return;
+
+        this.navCollapsed = !this.navCollapsed;
+        this.layoutEl.classList.toggle('collapsed', this.navCollapsed);
+
+        if(this.desktopNavToggleEl){
+            this.desktopNavToggleEl.textContent = this.navCollapsed ? '▶' : '◀';
+            this.desktopNavToggleEl.setAttribute('aria-expanded', String(!this.navCollapsed));
+            this.desktopNavToggleEl.setAttribute('aria-label', this.navCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+    }
+
+    openMobileNav(){
+        if(!this.sideNavEl || !this.navOverlayEl) return;
+        this.sideNavEl.classList.add('open');
+        this.navOverlayEl.classList.add('active');
+        this.mobileNavToggleEl?.setAttribute('aria-expanded', 'true');
+    }
+
+    closeMobileNav(){
+        if(!this.sideNavEl || !this.navOverlayEl) return;
+        this.sideNavEl.classList.remove('open');
+        this.navOverlayEl.classList.remove('active');
+        this.mobileNavToggleEl?.setAttribute('aria-expanded', 'false');
+    }
+
+    toggleMobileNav(){
+        if(!this.sideNavEl) return;
+        if(this.sideNavEl.classList.contains('open')){
+            this.closeMobileNav();
+        }else{
+            this.openMobileNav();
+        }
+    }
+
+    handleNavResize(){
+        if(!this.layoutEl || !this.sideNavEl || !this.navOverlayEl) return;
+
+        if(window.matchMedia('(max-width: 768px)').matches){
+            this.layoutEl.classList.remove('collapsed');
+            this.sideNavEl.classList.remove('open');
+            this.navOverlayEl.classList.remove('active');
+        }else{
+            this.sideNavEl.classList.remove('open');
+            this.navOverlayEl.classList.remove('active');
+            this.layoutEl.classList.toggle('collapsed', this.navCollapsed);
+        }
     }
 
     showStatus(msg,type='success',elementId='status'){

@@ -7,6 +7,10 @@ import os
 import sys
 import subprocess
 
+NUMPY_VERSION = "1.26.4"
+CMDSTANPY_VERSION = "1.2.3"
+PROPHET_VERSION = "1.1.5"
+
 print("=" * 100)
 print("Installing Prophet with proper configuration...")
 print("=" * 100)
@@ -23,13 +27,27 @@ subprocess.run([sys.executable, "-m", "pip", "uninstall", "pystan", "-y"],
 
 # Step 2: Install cmdstanpy
 print("2️⃣  Installing cmdstanpy...")
-subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "cmdstanpy", 
-                "--no-cache-dir"], check=True)
+subprocess.run([
+    sys.executable,
+    "-m",
+    "pip",
+    "install",
+    "--upgrade",
+    f"numpy=={NUMPY_VERSION}",
+    f"cmdstanpy=={CMDSTANPY_VERSION}",
+    "--no-cache-dir",
+], check=True)
 
 # Step 3: Install Prophet
 print("3️⃣  Installing Prophet (this may take a few minutes)...")
-subprocess.run([sys.executable, "-m", "pip", "install", "prophet", 
-                "--no-cache-dir"], check=True)
+subprocess.run([
+    sys.executable,
+    "-m",
+    "pip",
+    "install",
+    f"prophet=={PROPHET_VERSION}",
+    "--no-cache-dir",
+], check=True)
 
 # Step 4: Test Prophet
 print("\n4️⃣  Testing Prophet import...")
@@ -45,7 +63,7 @@ try:
     
     # Try to fit
     print("   Creating Prophet model...")
-    model = Prophet(stan_backend='cmdstanpy')
+    model = Prophet(stan_backend='CMDSTANPY')
     
     print("   Fitting model (first run downloads Stan)...")
     import warnings
