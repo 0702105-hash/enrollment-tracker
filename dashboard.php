@@ -1059,15 +1059,69 @@ tbody tr:hover{
     </div>
 
     <div id="predictions" class="tab-content">
-        <div class="card">
-            <h2>🔮 Enrollment Predictions with Historical Data</h2>
 
+        <!-- Combined predicted + historical chart — mirrors overview combined chart -->
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
+                <h2>📊 All Programs Combined Enrollment Trend</h2>
+                <div class="select-container" style="margin:0;">
+                    <select id="predSemesterFilter" style="flex:1;max-width:160px;">
+                        <option value="">All Semesters</option>
+                        <option value="1">Semester 1</option>
+                        <option value="2">Semester 2</option>
+                        <option value="12">Semester 1 &amp; 2</option>
+                        <option value="3">Semester 3</option>
+                    </select>
+                    <select id="predModelFilter" style="flex:1;max-width:160px;">
+                        <option value="Ensemble">Ensemble</option>
+                        <option value="Prophet">Prophet</option>
+                        <option value="LSTM">LSTM</option>
+                        <option value="XGBoost">XGBoost</option>
+                    </select>
+                    <button onclick="tracker.refreshPredCombinedChart()" style="margin:0;">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="custom-legend" id="predCombinedLegend" style="margin-bottom:16px;">
+                <div class="legend-item"><span class="legend-line" style="background:#ed8936;"></span>Historical Total</div>
+                <div class="legend-item"><span class="legend-line" style="background:#2b6cb0;"></span>Historical Male</div>
+                <div class="legend-item"><span class="legend-line" style="background:#d53f8c;"></span>Historical Female</div>
+                <div class="legend-item"><span class="legend-line" style="background:#ed8936;border-top:3px dashed #ed8936;height:0;width:24px;display:inline-block;vertical-align:middle;"></span>Predicted Total</div>
+                <div class="legend-item"><span class="legend-line" style="background:#2b6cb0;border-top:3px dashed #2b6cb0;height:0;width:24px;display:inline-block;vertical-align:middle;"></span>Predicted Male</div>
+                <div class="legend-item"><span class="legend-line" style="background:#d53f8c;border-top:3px dashed #d53f8c;height:0;width:24px;display:inline-block;vertical-align:middle;"></span>Predicted Female</div>
+            </div>
+            <div class="chart-container" style="height:400px;">
+                <canvas id="predCombinedChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Per-program predicted + historical charts grid — mirrors overview programs grid -->
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
+                <h2>📈 Enrollment Trends by Program</h2>
+                <div class="select-container" style="margin:0;">
+                    <select id="predProgModelFilter" style="flex:1;max-width:160px;">
+                        <option value="Ensemble">Ensemble</option>
+                        <option value="Prophet">Prophet</option>
+                        <option value="LSTM">LSTM</option>
+                        <option value="XGBoost">XGBoost</option>
+                    </select>
+                    <button onclick="tracker.refreshPredByProgramCharts()" style="margin:0;">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="programs-charts-grid" id="predProgramsChartsGrid">
+                <div class="text-center" style="padding:40px;grid-column:1/-1;color:#718096;">Loading charts...</div>
+            </div>
+        </div>
+
+        <!-- Per-program deep-dive: select one program, see all 4 model predictions -->
+        <div class="card">
+            <h2>🔮 Per-Program Prediction Detail</h2>
             <div class="select-container">
-                <label style="margin-right:10px;font-weight:600;">Select Program:</label>
+                <label style="font-weight:600;">Select Program:</label>
                 <select id="predProgramFilter" style="flex:1;max-width:400px;">
                     <option value="">Choose a program</option>
                 </select>
-                <button onclick="tracker.refreshPredictions()">🔄 Load Chart</button>
+                <button onclick="tracker.refreshPredictions()">🔄 Load Detail</button>
             </div>
 
             <div id="predictionChartContainer" class="card" style="margin-top:20px;display:none;">
@@ -1221,6 +1275,8 @@ class EnrollmentTracker{
         this.charts = {};
         this.predictionChart = null;
         this.combinedChart = null;
+        this.predCombinedChart = null;
+        this.predProgramCharts = {};
         this.allEnrollments = [];
         this.allPrograms = [];
         this.allPredictions = [];
@@ -1265,6 +1321,8 @@ class EnrollmentTracker{
                     document.getElementById('predictionChartContainer').style.display = 'none';
                     document.getElementById('predictionStatsContainer').style.display = 'none';
                     document.getElementById('predictionCompareContainer').style.display = 'none';
+                    this.refreshPredCombinedChart();
+                    this.refreshPredByProgramCharts();
                 }else if(tabId === 'overview'){
                     this.loadAllProgramsCharts();
                     this.refreshCombinedChart();
@@ -1382,6 +1440,8 @@ class EnrollmentTracker{
             await this.loadPredictionsData();
             this.loadAllProgramsCharts();
             this.refreshCombinedChart();
+            this.refreshPredCombinedChart();
+            this.refreshPredByProgramCharts();
 
         }catch(e){
             this.showStatus('Failed to load programs: '+e.message,'error');
@@ -2111,6 +2171,389 @@ class EnrollmentTracker{
                 </div>
             </div>
         `).join('');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // PREDICTIONS TAB — Combined chart (historical + predicted, all programs)
+    // Exactly mirrors refreshCombinedChart / createCombinedChart in overview
+    // ─────────────────────────────────────────────────────────────────
+    refreshPredCombinedChart(){
+        const semFilter   = document.getElementById('predSemesterFilter')?.value || '';
+        const modelFilter = document.getElementById('predModelFilter')?.value    || 'Ensemble';
+
+        // ── Historical data (same logic as refreshCombinedChart) ──
+        let filtered = [...this.allEnrollments].filter(e => {
+            const [sy, ey] = String(e.academic_year).split('-').map(Number);
+            return (ey - sy) === 1;
+        });
+        if(semFilter){
+            if(['1','2','3'].includes(semFilter)){
+                filtered = filtered.filter(e => parseInt(e.semester) === parseInt(semFilter));
+            } else if(semFilter === '12'){
+                filtered = filtered.filter(e => [1,2].includes(parseInt(e.semester)));
+            }
+        }
+        const histAgg = {};
+        filtered.forEach(e => {
+            const key = `${e.academic_year} S${e.semester}`;
+            if(!histAgg[key]) histAgg[key] = { total:0, male:0, female:0 };
+            histAgg[key].male   += parseInt(e.male)   || 0;
+            histAgg[key].female += parseInt(e.female) || 0;
+            histAgg[key].total  += (parseInt(e.male)||0) + (parseInt(e.female)||0);
+        });
+
+        // ── Prediction data ──
+        let preds = this.allPredictions.filter(p => p.model_name === modelFilter);
+        if(semFilter && ['1','2','3'].includes(semFilter)){
+            preds = preds.filter(p => parseInt(p.semester) === parseInt(semFilter));
+        } else if(semFilter === '12'){
+            preds = preds.filter(p => [1,2].includes(parseInt(p.semester)));
+        }
+        const predAgg = {};
+        preds.forEach(p => {
+            const key = `${p.academic_year} S${p.semester}`;
+            if(!predAgg[key]) predAgg[key] = { total:0, male:0, female:0 };
+            predAgg[key].total  += parseInt(p.predicted_total)  || 0;
+            predAgg[key].male   += parseInt(p.predicted_male)   || 0;
+            predAgg[key].female += parseInt(p.predicted_female) || 0;
+        });
+
+        // ── Merge & sort all period keys ──
+        const allKeys = [...new Set([...Object.keys(histAgg), ...Object.keys(predAgg)])].sort((a, b) => {
+            const [ayA, sA] = a.split(' S');
+            const [ayB, sB] = b.split(' S');
+            const yA = parseInt(ayA.split('-')[0]);
+            const yB = parseInt(ayB.split('-')[0]);
+            return yA !== yB ? yA - yB : parseInt(sA) - parseInt(sB);
+        });
+
+        if(allKeys.length === 0) return;
+
+        const toVal = (map, key, field) => Object.prototype.hasOwnProperty.call(map, key) ? map[key][field] : null;
+
+        const ctx = document.getElementById('predCombinedChart');
+        if(!ctx) return;
+        if(this.predCombinedChart) this.predCombinedChart.destroy();
+
+        this.predCombinedChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: allKeys,
+                datasets: [
+                    {
+                        label: 'Total Enrollment',
+                        data: allKeys.map(k => toVal(histAgg, k, 'total')),
+                        borderColor: '#ed8936',
+                        backgroundColor: 'rgba(237,137,54,0.15)',
+                        borderWidth: 4,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#ed8936',
+                        spanGaps: false
+                    },
+                    {
+                        label: 'Male Students',
+                        data: allKeys.map(k => toVal(histAgg, k, 'male')),
+                        borderColor: '#2b6cb0',
+                        backgroundColor: 'rgba(43,108,176,0.05)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#2b6cb0',
+                        spanGaps: false
+                    },
+                    {
+                        label: 'Female Students',
+                        data: allKeys.map(k => toVal(histAgg, k, 'female')),
+                        borderColor: '#d53f8c',
+                        backgroundColor: 'rgba(213,63,140,0.05)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#d53f8c',
+                        spanGaps: false
+                    },
+                    {
+                        label: 'Predicted Total',
+                        data: allKeys.map(k => toVal(predAgg, k, 'total')),
+                        borderColor: '#ed8936',
+                        backgroundColor: 'rgba(237,137,54,0.08)',
+                        borderWidth: 4,
+                        borderDash: [8, 4],
+                        fill: false,
+                        tension: 0.4,
+                        pointRadius: 6,
+                        pointStyle: 'triangle',
+                        pointBackgroundColor: '#ed8936',
+                        spanGaps: false
+                    },
+                    {
+                        label: 'Predicted Male',
+                        data: allKeys.map(k => toVal(predAgg, k, 'male')),
+                        borderColor: '#2b6cb0',
+                        borderWidth: 3,
+                        borderDash: [8, 4],
+                        fill: false,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointStyle: 'triangle',
+                        pointBackgroundColor: '#2b6cb0',
+                        spanGaps: false
+                    },
+                    {
+                        label: 'Predicted Female',
+                        data: allKeys.map(k => toVal(predAgg, k, 'female')),
+                        borderColor: '#d53f8c',
+                        borderWidth: 3,
+                        borderDash: [8, 4],
+                        fill: false,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointStyle: 'triangle',
+                        pointBackgroundColor: '#d53f8c',
+                        spanGaps: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    datalabels: {
+                        display: true,
+                        font: { weight: 'bold', size: 11 },
+                        color: '#2d3748',
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        borderRadius: 4,
+                        padding: 4,
+                        anchor: 'end',
+                        align: 'top'
+                    },
+                    legend: { display: true, position: 'top' }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { callback: value => value.toLocaleString() }
+                    }
+                }
+            },
+            plugins: [ChartDataLabels]
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // PREDICTIONS TAB — Per-program charts grid (historical + predicted)
+    // Exactly mirrors loadAllProgramsCharts / createProgramChart in overview
+    // ─────────────────────────────────────────────────────────────────
+    refreshPredByProgramCharts(){
+        const modelFilter = document.getElementById('predProgModelFilter')?.value || 'Ensemble';
+        const grid = document.getElementById('predProgramsChartsGrid');
+        if(!grid) return;
+
+        // Destroy old charts
+        if(!this.predProgramCharts) this.predProgramCharts = {};
+        Object.values(this.predProgramCharts).forEach(c => { try{ c.destroy(); }catch(e){} });
+        this.predProgramCharts = {};
+        grid.innerHTML = '';
+
+        const preds = this.allPredictions.filter(p => p.model_name === modelFilter);
+
+        let hasAny = false;
+        for(const programId of Object.keys(programNames).map(Number)){
+
+            // Historical for this program
+            const histData = this.allEnrollments.filter(e => {
+                const [sy, ey] = String(e.academic_year).split('-').map(Number);
+                return (ey - sy) === 1 && e.program_id == programId;
+            });
+
+            // Predictions for this program
+            const predData = preds.filter(p => p.program_id == programId);
+
+            if(histData.length === 0 && predData.length === 0) continue;
+            hasAny = true;
+
+            // Sort both
+            const sortPeriod = (a, b) => {
+                const ya = parseInt(String(a.academic_year).split('-')[0]);
+                const yb = parseInt(String(b.academic_year).split('-')[0]);
+                return ya !== yb ? ya - yb : parseInt(a.semester) - parseInt(b.semester);
+            };
+            histData.sort(sortPeriod);
+            predData.sort(sortPeriod);
+
+            // Stats for card header (historical totals)
+            const totalHist   = histData.reduce((s,e) => s + (parseInt(e.male)||0) + (parseInt(e.female)||0), 0);
+            const totalMaleH  = histData.reduce((s,e) => s + (parseInt(e.male)||0), 0);
+            const totalFemaleH= histData.reduce((s,e) => s + (parseInt(e.female)||0), 0);
+            const totalPred   = predData.reduce((s,p) => s + (parseInt(p.predicted_total)||0), 0);
+
+            // Build merged label list
+            const histKeys = histData.map(e => `${e.academic_year} S${e.semester}`);
+            const predKeys = predData.map(p => `${p.academic_year} S${p.semester}`);
+            const allKeys  = [...new Set([...histKeys, ...predKeys])].sort((a, b) => {
+                const [ayA, sA] = a.split(' S');
+                const [ayB, sB] = b.split(' S');
+                const yA = parseInt(ayA.split('-')[0]);
+                const yB = parseInt(ayB.split('-')[0]);
+                return yA !== yB ? yA - yB : parseInt(sA) - parseInt(sB);
+            });
+
+            const histMap = {};
+            histData.forEach(e => {
+                histMap[`${e.academic_year} S${e.semester}`] = {
+                    total: (parseInt(e.male)||0) + (parseInt(e.female)||0),
+                    male:  parseInt(e.male)   || 0,
+                    female:parseInt(e.female) || 0
+                };
+            });
+            const predMap = {};
+            predData.forEach(p => {
+                predMap[`${p.academic_year} S${p.semester}`] = {
+                    total: parseInt(p.predicted_total)  || 0,
+                    male:  parseInt(p.predicted_male)   || 0,
+                    female:parseInt(p.predicted_female) || 0
+                };
+            });
+
+            const toVal = (map, key, field) => Object.prototype.hasOwnProperty.call(map, key) ? map[key][field] : null;
+
+            const card = document.createElement('div');
+            card.className = 'program-chart-card';
+            card.innerHTML = `
+                <h3>${programNames[programId]}</h3>
+                <div class="program-stats">
+                    <div class="stat-item">Historical Total: <strong>${totalHist.toLocaleString()}</strong></div>
+                    <div class="stat-item">Male: <strong>${totalMaleH.toLocaleString()}</strong></div>
+                    <div class="stat-item">Female: <strong>${totalFemaleH.toLocaleString()}</strong></div>
+                    <div class="stat-item">Predicted Total: <strong>${totalPred.toLocaleString()}</strong></div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="pred-chart-prog-${programId}"></canvas>
+                </div>
+            `;
+            grid.appendChild(card);
+
+            setTimeout(() => {
+                const ctx = document.getElementById(`pred-chart-prog-${programId}`);
+                if(!ctx) return;
+
+                this.predProgramCharts[programId] = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: allKeys,
+                        datasets: [
+                            {
+                                label: 'Total',
+                                data: allKeys.map(k => toVal(histMap, k, 'total')),
+                                borderColor: '#ed8936',
+                                backgroundColor: 'rgba(237,137,54,0.1)',
+                                borderWidth: 3,
+                                fill: true,
+                                tension: 0.4,
+                                pointRadius: 5,
+                                pointBackgroundColor: '#ed8936',
+                                spanGaps: false
+                            },
+                            {
+                                label: 'Male',
+                                data: allKeys.map(k => toVal(histMap, k, 'male')),
+                                borderColor: '#2b6cb0',
+                                borderWidth: 2,
+                                fill: false,
+                                tension: 0.4,
+                                pointRadius: 4,
+                                pointBackgroundColor: '#2b6cb0',
+                                spanGaps: false
+                            },
+                            {
+                                label: 'Female',
+                                data: allKeys.map(k => toVal(histMap, k, 'female')),
+                                borderColor: '#d53f8c',
+                                borderWidth: 2,
+                                fill: false,
+                                tension: 0.4,
+                                pointRadius: 4,
+                                pointBackgroundColor: '#d53f8c',
+                                spanGaps: false
+                            },
+                            {
+                                label: 'Predicted Total',
+                                data: allKeys.map(k => toVal(predMap, k, 'total')),
+                                borderColor: '#ed8936',
+                                backgroundColor: 'rgba(237,137,54,0.06)',
+                                borderWidth: 3,
+                                borderDash: [7, 4],
+                                fill: false,
+                                tension: 0.4,
+                                pointRadius: 5,
+                                pointStyle: 'triangle',
+                                pointBackgroundColor: '#ed8936',
+                                spanGaps: false
+                            },
+                            {
+                                label: 'Predicted Male',
+                                data: allKeys.map(k => toVal(predMap, k, 'male')),
+                                borderColor: '#2b6cb0',
+                                borderWidth: 2,
+                                borderDash: [7, 4],
+                                fill: false,
+                                tension: 0.4,
+                                pointRadius: 4,
+                                pointStyle: 'triangle',
+                                pointBackgroundColor: '#2b6cb0',
+                                spanGaps: false
+                            },
+                            {
+                                label: 'Predicted Female',
+                                data: allKeys.map(k => toVal(predMap, k, 'female')),
+                                borderColor: '#d53f8c',
+                                borderWidth: 2,
+                                borderDash: [7, 4],
+                                fill: false,
+                                tension: 0.4,
+                                pointRadius: 4,
+                                pointStyle: 'triangle',
+                                pointBackgroundColor: '#d53f8c',
+                                spanGaps: false
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            datalabels: {
+                                display: true,
+                                font: { weight: 'bold', size: 10 },
+                                color: '#2d3748',
+                                backgroundColor: 'rgba(255,255,255,0.9)',
+                                borderRadius: 4,
+                                padding: 4,
+                                anchor: 'end',
+                                align: 'top'
+                            },
+                            legend: { display: true, position: 'top' }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: { callback: value => value.toLocaleString() }
+                            }
+                        }
+                    },
+                    plugins: [ChartDataLabels]
+                });
+            }, 0);
+        }
+
+        if(!hasAny){
+            grid.innerHTML = '<div class="text-center" style="padding:40px;grid-column:1/-1;color:#718096;">No prediction data available</div>';
+        }
     }
 
     buildPredictionMap(predictions){
