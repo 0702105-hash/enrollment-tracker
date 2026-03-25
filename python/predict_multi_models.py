@@ -25,7 +25,7 @@ from tensorflow.keras.optimizers import Adam
 from xgboost import XGBRegressor
 
 print("=" * 80)
-print("🔮 MULTI-MODEL ENROLLMENT PREDICTION SYSTEM (2026-2027+)")
+print("🔮 MULTI-MODEL ENROLLMENT PREDICTION SYSTEM (2026-2027 & 2027-2028)")
 print("Models: Facebook Prophet | LSTM | XGBoost")
 print("=" * 80)
 
@@ -135,12 +135,22 @@ class ProphetPredictor:
         try:
             train_df = self.prepare_data(y_train)
 
-            self.model = Prophet(
-                yearly_seasonality=self.yearly_seasonality,
-                weekly_seasonality=self.weekly_seasonality,
-                interval_width=0.95,
-                stan_backend='CMDSTANPY'
-            )
+            # Try Prophet with default backend first (faster and more reliable)
+            try:
+                self.model = Prophet(
+                    yearly_seasonality=self.yearly_seasonality,
+                    weekly_seasonality=self.weekly_seasonality,
+                    interval_width=0.95
+                )
+            except Exception:
+                # Fallback with CMDSTANPY if available
+                self.model = Prophet(
+                    yearly_seasonality=self.yearly_seasonality,
+                    weekly_seasonality=self.weekly_seasonality,
+                    interval_width=0.95,
+                    stan_backend='CMDSTANPY'
+                )
+            
             self.model.fit(train_df)
 
             future = self.model.make_future_dataframe(periods=len(y_test), freq='3MS')
@@ -426,7 +436,7 @@ def load_enrollment_data():
             SELECT program_id, academic_year, semester, male, female,
                    (male + female) as total
             FROM enrollments
-            WHERE academic_year NOT LIKE '%-2027'
+            WHERE academic_year NOT LIKE '%-2027' AND semester != 3
             ORDER BY program_id, academic_year, semester
         """, conn)
     finally:
@@ -780,6 +790,11 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
         for sem_offset, pred_value in enumerate(predictions):
             sem = (sem_offset % 3) + 1
             year_offset = sem_offset // 3
+            
+            # Skip semester 3 (summer) as requested
+            if sem == 3:
+                continue
+            
             academic_year = f"{base_year + year_offset}-{base_year + year_offset + 1}"
 
             pred_total = int(max(float(pred_value), 0))
@@ -943,7 +958,7 @@ if __name__ == "__main__":
     if df_hist is None:
         exit(1)
 
-    future_years = 1
+    future_years = 2  # Predict for 2 years: 2026-2027 and 2027-2028
     gender_ratio_map = build_gender_ratio_map(df_hist)
 
     all_predictions = []

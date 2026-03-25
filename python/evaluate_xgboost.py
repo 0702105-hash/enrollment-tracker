@@ -53,7 +53,7 @@ conn = mysql.connector.connect(**DB_CONFIG)
 df = pd.read_sql("""
     SELECT program_id, academic_year, semester, male, female
     FROM enrollments 
-    WHERE academic_year NOT LIKE '%-2027'
+    WHERE academic_year NOT LIKE '%-2027' AND semester != 3
     ORDER BY program_id, academic_year, semester
 """, conn)
 conn.close()
