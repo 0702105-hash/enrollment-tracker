@@ -197,31 +197,45 @@ class LSTMPredictor:
         self.metrics = {}
 
     def create_sequences(self, data):
-        X, y = [], []
+        X, y, target_indices = [], [], []
         for i in range(len(data) - self.sequence_length):
             X.append(data[i:i + self.sequence_length])
             y.append(data[i + self.sequence_length])
-        return np.array(X), np.array(y)
+            target_indices.append(i + self.sequence_length)
+        return np.array(X), np.array(y), np.array(target_indices)
 
     def train(self, y_train, y_test):
         print("      🔧 Training LSTM model...")
         try:
-            y_all = np.concatenate([y_train, y_test]).reshape(-1, 1)
-            scaled_data = self.scaler.fit_transform(y_all)
+            y_train_arr = np.array(y_train, dtype=float).reshape(-1, 1)
+            y_test_arr = np.array(y_test, dtype=float).reshape(-1, 1)
+            y_all = np.concatenate([y_train_arr, y_test_arr], axis=0)
 
-            train_scaled = scaled_data[:len(y_train)]
-            test_scaled = scaled_data[len(y_train):]
+            # Fit scaler on training history only to avoid look-ahead leakage.
+            self.scaler.fit(y_train_arr)
+            scaled_all = self.scaler.transform(y_all)
 
-            X_train, y_train_seq = self.create_sequences(train_scaled)
-            X_test, _ = self.create_sequences(test_scaled)
+            X_all, y_all_seq, target_indices = self.create_sequences(scaled_all)
+            if len(X_all) < 1:
+                print("      ⚠️  Insufficient data for LSTM")
+                return False
 
-            if len(X_train) < 1 or len(X_test) < 1:
+            split_point = len(y_train_arr)
+            train_mask = target_indices < split_point
+            test_mask = target_indices >= split_point
+
+            X_train = X_all[train_mask]
+            y_train_seq = y_all_seq[train_mask]
+            X_test = X_all[test_mask]
+            y_test_actual = y_all.flatten()[target_indices[test_mask]]
+
+            if len(X_train) < 2 or len(X_test) < 1:
                 print("      ⚠️  Insufficient data for LSTM")
                 return False
 
             self.model = Sequential([
-                LSTM(self.lstm_units, activation='relu', input_shape=(self.sequence_length, 1)),
-                Dropout(0.2),
+                LSTM(self.lstm_units, input_shape=(self.sequence_length, 1), recurrent_dropout=0.1),
+                Dropout(0.1),
                 Dense(16, activation='relu'),
                 Dense(1)
             ])
@@ -253,11 +267,6 @@ class LSTMPredictor:
 
             predictions_scaled = self.model.predict(X_test, verbose=0)
             predictions = self.scaler.inverse_transform(predictions_scaled)
-            y_test_actual = y_test[self.sequence_length:]
-
-            if len(y_test_actual) == 0:
-                print("      ⚠️  Insufficient test targets for LSTM")
-                return False
 
             self.metrics = ModelEvaluator.calculate_metrics(y_test_actual, predictions.flatten())
 
@@ -444,16 +453,127 @@ def build_gender_ratio_map(df_hist):
     return ratio_map
 
 
-def get_model_confidence(pred_result):
-    models_r2 = []
+def clip_value(value, min_value=0.0, max_value=1.0):
+    return float(np.clip(float(value), float(min_value), float(max_value)))
+
+
+def score_r2(r2_value):
+    if not is_valid_metric_value(r2_value):
+        return None
+
+    # Normalize R² from [-1, 1] to [0, 1] while clipping outliers.
+    clipped_r2 = clip_value(r2_value, -1.0, 1.0)
+    return (clipped_r2 + 1.0) / 2.0
+
+
+def score_mape(mape_value):
+    if not is_valid_metric_value(mape_value):
+        return None
+
+    mape = max(float(mape_value), 0.0)
+    if mape <= 5:
+        return 1.0
+    if mape <= 10:
+        return 0.9
+    if mape <= 20:
+        return 0.75
+    if mape <= 30:
+        return 0.6
+    if mape <= 50:
+        return 0.4
+    if mape <= 100:
+        return 0.2
+    return 0.05
+
+
+def score_theil_u(theil_u_value):
+    if not is_valid_metric_value(theil_u_value):
+        return None
+
+    theil_u = max(float(theil_u_value), 0.0)
+    if theil_u <= 0.5:
+        return 1.0
+    if theil_u <= 1.0:
+        return 0.8
+    if theil_u <= 1.5:
+        return 0.6
+    if theil_u <= 2.0:
+        return 0.4
+    if theil_u <= 3.0:
+        return 0.25
+    return 0.1
+
+
+def get_model_quality_score(model_result):
+    if not model_result or not model_result.get('metrics'):
+        return 0.5
+
+    metrics = model_result['metrics']
+    weighted_scores = []
+    total_weight = 0.0
+
+    metric_components = [
+        ('R²', 0.45, score_r2),
+        ('MAPE', 0.35, score_mape),
+        ('Theil_U', 0.20, score_theil_u)
+    ]
+
+    for metric_name, weight, scorer in metric_components:
+        score = scorer(metrics.get(metric_name))
+        if score is None:
+            continue
+        weighted_scores.append(score * weight)
+        total_weight += weight
+
+    if total_weight == 0:
+        return 0.5
+
+    quality_score = sum(weighted_scores) / total_weight
+    return clip_value(quality_score, 0.05, 0.98)
+
+
+def get_prediction_stability(pred_result):
+    first_step_predictions = []
 
     for key in ['prophet', 'lstm', 'xgboost']:
-        if pred_result.get(key) and pred_result[key].get('metrics'):
-            r2 = pred_result[key]['metrics'].get('R²', 0)
-            if is_valid_metric_value(r2):
-                models_r2.append(max(float(r2), 0))
+        model_result = pred_result.get(key)
+        if not model_result or model_result.get('predictions') is None:
+            continue
 
-    return float(np.mean(models_r2)) if models_r2 else 0.5
+        preds = np.array(model_result['predictions'], dtype=float)
+        if len(preds) > 0 and np.isfinite(preds[0]):
+            first_step_predictions.append(float(preds[0]))
+
+    if len(first_step_predictions) < 2:
+        return 0.85
+
+    preds = np.array(first_step_predictions, dtype=float)
+    spread = np.std(preds)
+    scale = max(np.mean(np.abs(preds)), 1.0)
+    coeff_var = spread / scale
+
+    # Lower disagreement across models increases confidence.
+    stability = 1.0 / (1.0 + 2.0 * coeff_var)
+    return clip_value(stability, 0.35, 1.0)
+
+
+def get_model_confidence(pred_result):
+    quality_scores = []
+
+    for key in ['prophet', 'lstm', 'xgboost']:
+        model_result = pred_result.get(key)
+        if model_result and model_result.get('metrics'):
+            quality_scores.append(get_model_quality_score(model_result))
+
+    if not quality_scores:
+        return 0.5
+
+    base_quality = float(np.mean(quality_scores))
+    stability = get_prediction_stability(pred_result)
+
+    # Blend quality (validation metrics) with cross-model agreement.
+    confidence = base_quality * (0.65 + 0.35 * stability)
+    return clip_value(confidence, 0.05, 0.98)
 
 
 def predict_for_program(program_id, program_data, future_years=1):
@@ -487,8 +607,8 @@ def predict_for_program(program_id, program_data, future_years=1):
         ModelEvaluator.print_metrics(prophet_pred['metrics'], "Prophet")
 
     print("\n   🔮 MODEL 2: LSTM (Neural Network)")
-    lstm_seq_len = max(1, min(3, len(y_train) // 3 if len(y_train) >= 3 else 1))
-    lstm_predictor = LSTMPredictor(sequence_length=lstm_seq_len, epochs=50, batch_size=4)
+    lstm_seq_len = min(4, max(2, len(y_train) // 5 if len(y_train) >= 5 else 2))
+    lstm_predictor = LSTMPredictor(sequence_length=lstm_seq_len, epochs=80, batch_size=4)
     lstm_success = lstm_predictor.train(y_train, y_test)
     lstm_pred = lstm_predictor.predict(y, steps=steps) if lstm_success else None
     if lstm_pred and lstm_pred.get('metrics'):
@@ -501,18 +621,41 @@ def predict_for_program(program_id, program_data, future_years=1):
     if xgb_pred and xgb_pred.get('metrics'):
         ModelEvaluator.print_metrics(xgb_pred['metrics'], "XGBoost")
 
-    predictions_list = [
-        prophet_pred['predictions'] if prophet_pred else None,
-        lstm_pred['predictions'] if lstm_pred else None,
-        xgb_pred['predictions'] if xgb_pred else None
+    model_outputs = [
+        ('prophet', prophet_pred),
+        ('lstm', lstm_pred),
+        ('xgboost', xgb_pred)
     ]
-    valid_predictions = [p for p in predictions_list if p is not None]
+
+    weighted_predictions = []
+    model_weights = []
+    valid_models = []
+
+    for model_key, model_result in model_outputs:
+        if not model_result or model_result.get('predictions') is None:
+            continue
+
+        weight = get_model_quality_score(model_result)
+        weighted_predictions.append(np.array(model_result['predictions'], dtype=float))
+        model_weights.append(weight)
+        valid_models.append(model_key)
+
+    valid_predictions = weighted_predictions
 
     if not valid_predictions:
         print("      ❌ No valid predictions from any model")
         return None
 
-    ensemble_pred = np.mean(valid_predictions, axis=0)
+    if len(valid_predictions) == 1:
+        ensemble_pred = valid_predictions[0]
+    else:
+        stacked_predictions = np.vstack(valid_predictions)
+        ensemble_pred = np.average(stacked_predictions, axis=0, weights=np.array(model_weights, dtype=float))
+
+    weights_text = ", ".join(
+        f"{model_name}={weight:.2f}" for model_name, weight in zip(valid_models, model_weights)
+    )
+    print(f"   ⚖️ Ensemble weights: {weights_text}")
 
     return {
         'program_id': program_id,
@@ -605,7 +748,7 @@ def ensure_predictions_schema(cursor):
 
 def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, predictions_columns):
     program_id = int(pred_result['program_id'])
-    confidence = get_model_confidence(pred_result)
+    program_confidence = get_model_confidence(pred_result)
     base_year = 2026
     inserted_count = 0
     has_model_name = 'model_name' in predictions_columns
@@ -625,6 +768,12 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
     for model_name, model_result in model_map.items():
         if not model_result or model_result.get('predictions') is None:
             continue
+
+        model_quality = get_model_quality_score(model_result)
+        if model_name == 'Ensemble':
+            row_confidence = program_confidence
+        else:
+            row_confidence = clip_value((0.7 * model_quality) + (0.3 * program_confidence), 0.05, 0.98)
 
         predictions = model_result['predictions'][:future_years * 3]
 
@@ -653,7 +802,7 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
                 pred_total,
                 pred_male,
                 pred_female,
-                confidence
+                row_confidence
             ]
 
             if has_model_ensemble:

@@ -120,11 +120,27 @@ body{
 }
 
 .header-banner{
-    background:linear-gradient(135deg,#2f855a,#2c5282);
+    background:rgba(15,23,42,0.68);
+    background-position:center;
+    background-repeat:no-repeat;
+    background-size:cover;
+    transition:background-image .4s ease-in-out;
     color:white;
     padding:30px;
     border-radius:18px;
     margin-bottom:25px;
+}
+
+.header-banner.bg-day{
+    background-image:url('assets/day_v1.png');
+}
+
+.header-banner.bg-afternoon{
+    background-image:url('assets/afternoon_v1.png');
+}
+
+.header-banner.bg-night{
+    background-image:url('assets/night_v1.png');
 }
 
 .header-banner h1{
@@ -1292,6 +1308,7 @@ class EnrollmentTracker{
 <?php if (isset($_GET['login'])): ?>
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('dashboard').style.display='block';
+            this.startBackgroundScheduler();
             this.setupTabs();
             this.setupSideNav();
             this.loadPrograms();
@@ -1398,6 +1415,36 @@ class EnrollmentTracker{
             this.navOverlayEl.classList.remove('active');
             this.layoutEl.classList.toggle('collapsed', this.navCollapsed);
         }
+    }
+
+    applyTimeBasedBackground(){
+        const now = new Date();
+        const minutes = now.getHours() * 60 + now.getMinutes();
+        const headerBanner = document.querySelector('.header-banner');
+
+        if(!headerBanner) return;
+
+        headerBanner.classList.remove('bg-day', 'bg-afternoon', 'bg-night');
+
+        // 5:01 AM to 12:59 PM
+        if(minutes >= 301 && minutes <= 779){
+            headerBanner.classList.add('bg-day');
+            return;
+        }
+
+        // 1:00 PM to 5:00 PM
+        if(minutes >= 780 && minutes <= 1020){
+            headerBanner.classList.add('bg-afternoon');
+            return;
+        }
+
+        // 5:01 PM to 5:00 AM
+        headerBanner.classList.add('bg-night');
+    }
+
+    startBackgroundScheduler(){
+        this.applyTimeBasedBackground();
+        this.backgroundTimer = setInterval(() => this.applyTimeBasedBackground(), 30000);
     }
 
     showStatus(msg,type='success',elementId='status'){
