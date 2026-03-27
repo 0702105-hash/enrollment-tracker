@@ -408,7 +408,7 @@ def save_to_database(all_predictions):
                 """, (
                     int(program_id), '2026-2027', int(sem_num),
                     int(pred_total), int(pred_male), int(pred_female),
-                    float(0.85)
+                    float(0.95)
                 ))
                 pred_count += 1
             

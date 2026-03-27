@@ -21,7 +21,7 @@ SARMAX_CONFIG = {
 PROPHET_CONFIG = {
     'yearly_seasonality': False,   # Annual patterns
     'weekly_seasonality': False,   # Weekly patterns (usually False for academic data)
-    'interval_width': 0.95,        # 95% confidence interval
+    'interval_width': 0.99,        # 99% confidence interval
     'changepoint_prior_scale': 0.05,  # Sensitivity to trend changes
     'seasonality_mode': 'additive', # or 'multiplicative'
     'seasonality_prior_scale': 10.0
@@ -60,7 +60,7 @@ ENSEMBLE_CONFIG = {
 # - Theil-U (Theil Inequality Coefficient)
 
 METRICS_CONFIG = {
-    'confidence_level': 0.95,      # 95% confidence intervals
+    'confidence_level': 0.99,      # 99% confidence intervals
     'show_all_metrics': True,      # Display all metrics or just key ones
     'save_to_db': True             # Save metrics to database
 }

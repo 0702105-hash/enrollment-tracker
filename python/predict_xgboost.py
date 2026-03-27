@@ -87,7 +87,7 @@ def generate_all_predictions(df_hist, prog_names):
                         'predicted_total': pred_total,
                         'predicted_male': pred_male,
                         'predicted_female': pred_female,
-                        'confidence': 0.85
+                        'confidence': 0.95
                     })
             
             # Print all predictions for this program

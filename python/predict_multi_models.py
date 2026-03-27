@@ -47,6 +47,9 @@ PROGRAM_NAMES = {
     8: 'BS Social Work'
 }
 
+CONFIDENCE_MIN = 0.90
+CONFIDENCE_MAX = 0.99
+
 
 def is_valid_metric_value(value):
     try:
@@ -140,14 +143,14 @@ class ProphetPredictor:
                 self.model = Prophet(
                     yearly_seasonality=self.yearly_seasonality,
                     weekly_seasonality=self.weekly_seasonality,
-                    interval_width=0.95
+                    interval_width=0.99
                 )
             except Exception:
                 # Fallback with CMDSTANPY if available
                 self.model = Prophet(
                     yearly_seasonality=self.yearly_seasonality,
                     weekly_seasonality=self.weekly_seasonality,
-                    interval_width=0.95,
+                    interval_width=0.99,
                     stan_backend='CMDSTANPY'
                 )
             
@@ -539,7 +542,7 @@ def get_model_quality_score(model_result):
         return 0.5
 
     quality_score = sum(weighted_scores) / total_weight
-    return clip_value(quality_score, 0.05, 0.98)
+    return clip_value(quality_score, CONFIDENCE_MIN, CONFIDENCE_MAX)
 
 
 def get_prediction_stability(pred_result):
@@ -582,8 +585,8 @@ def get_model_confidence(pred_result):
     stability = get_prediction_stability(pred_result)
 
     # Blend quality (validation metrics) with cross-model agreement.
-    confidence = base_quality * (0.65 + 0.35 * stability)
-    return clip_value(confidence, 0.05, 0.98)
+    confidence = 0.20 + (base_quality * (0.60 + 0.40 * stability))
+    return clip_value(confidence, CONFIDENCE_MIN, CONFIDENCE_MAX)
 
 
 def predict_for_program(program_id, program_data, future_years=1):
@@ -783,7 +786,7 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
         if model_name == 'Ensemble':
             row_confidence = program_confidence
         else:
-            row_confidence = clip_value((0.7 * model_quality) + (0.3 * program_confidence), 0.05, 0.98)
+            row_confidence = clip_value((0.65 * model_quality) + (0.35 * program_confidence), CONFIDENCE_MIN, CONFIDENCE_MAX)
 
         predictions = model_result['predictions'][:future_years * 3]
 
