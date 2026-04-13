@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-Multi-Model Enrollment Prediction System
-Supports: Facebook Prophet, LSTM, and XGBoost
-Generates predictions for multiple future years with comprehensive evaluation metrics
-Saves per-model predictions and metrics for dashboard visualization.
-"""
-
 import time
 import warnings
 
@@ -46,9 +38,8 @@ PROGRAM_NAMES = {
     7: 'BSIT',
     8: 'BS Social Work'
 }
-
-CONFIDENCE_MIN = 0.90
-CONFIDENCE_MAX = 0.99
+# Canonical ensemble label used everywhere (DB, API defaults, UI labels)
+ENSEMBLE_LABEL = "Prophet+LSTM+XGBoost"
 
 
 def is_valid_metric_value(value):
@@ -153,7 +144,7 @@ class ProphetPredictor:
                     interval_width=0.99,
                     stan_backend='CMDSTANPY'
                 )
-            
+
             self.model.fit(train_df)
 
             future = self.model.make_future_dataframe(periods=len(y_test), freq='3MS')
@@ -702,26 +693,61 @@ def get_table_columns(cursor, table_name):
     return {row[0] for row in cursor.fetchall()}
 
 
+def _unique_index_columns(index_map_entry):
+    """
+    index_map_entry: dict with keys: non_unique, columns (seq -> column_name)
+    returns ordered list of column names
+    """
+    ordered_cols = [index_map_entry['columns'][k] for k in sorted(index_map_entry['columns'])]
+    return ordered_cols
+
+
 def ensure_predictions_schema(cursor):
+    """
+    Ensure predictions table has columns + unique constraint needed for per-model predictions.
+    - model_name should NOT be forced to 'Ensemble' by default; allow NULL.
+    - model_ensemble default should match the actual ensemble label.
+    - unique key must include model_name to prevent overwrites between models.
+    """
     columns = get_table_columns(cursor, 'predictions')
 
+    # Ensure columns exist
     if 'model_ensemble' not in columns:
-        cursor.execute("""
+        cursor.execute(f"""
             ALTER TABLE predictions
-            ADD COLUMN model_ensemble VARCHAR(255) DEFAULT 'Prophet+LSTM+XGBoost'
+            ADD COLUMN model_ensemble VARCHAR(255) NULL DEFAULT '{ENSEMBLE_LABEL}'
         """)
 
     if 'model_name' not in columns:
+        # Make nullable by default to avoid silently forcing everything to "Ensemble"
         cursor.execute("""
             ALTER TABLE predictions
-            ADD COLUMN model_name VARCHAR(50) DEFAULT 'Ensemble'
+            ADD COLUMN model_name VARCHAR(50) NULL DEFAULT NULL
+        """)
+    else:
+        # If it exists, force it to be NULLable (some older schema used NOT NULL DEFAULT 'Ensemble')
+        cursor.execute("""
+            ALTER TABLE predictions
+            MODIFY model_name VARCHAR(50) NULL DEFAULT NULL
         """)
 
+    # Normalize model_ensemble default if possible (best effort)
+    try:
+        cursor.execute(f"""
+            ALTER TABLE predictions
+            ALTER COLUMN model_ensemble SET DEFAULT '{ENSEMBLE_LABEL}'
+        """)
+    except Exception:
+        # Some MySQL/MariaDB variants don't support ALTER COLUMN SET DEFAULT in this syntax
+        pass
+
+    # Read indexes
     cursor.execute("SHOW INDEX FROM predictions")
     index_rows = cursor.fetchall()
 
     index_map = {}
     for row in index_rows:
+        # SHOW INDEX columns: Table, Non_unique, Key_name, Seq_in_index, Column_name, ...
         key_name = row[2]
         non_unique = row[1]
         seq_in_index = int(row[3])
@@ -732,40 +758,49 @@ def ensure_predictions_schema(cursor):
                 'non_unique': non_unique,
                 'columns': {}
             }
-
         index_map[key_name]['columns'][seq_in_index] = column_name
 
+    # Drop old UNIQUE(program_id, academic_year, semester) if it exists (it causes overwrites)
     for key_name, meta in index_map.items():
         if meta['non_unique'] != 0:
             continue
-
-        ordered_cols = [meta['columns'][k] for k in sorted(meta['columns'])]
-        if ordered_cols == ['program_id', 'academic_year', 'semester']:
+        if _unique_index_columns(meta) == ['program_id', 'academic_year', 'semester']:
             cursor.execute(f"ALTER TABLE predictions DROP INDEX {key_name}")
 
+    # Ensure UNIQUE(program_id, academic_year, semester, model_name) exists
     has_target_unique = False
     for meta in index_map.values():
         if meta['non_unique'] != 0:
             continue
-        ordered_cols = [meta['columns'][k] for k in sorted(meta['columns'])]
-        if ordered_cols == ['program_id', 'academic_year', 'semester', 'model_name']:
+        if _unique_index_columns(meta) == ['program_id', 'academic_year', 'semester', 'model_name']:
             has_target_unique = True
             break
 
     if not has_target_unique:
         cursor.execute("""
             ALTER TABLE predictions
-            ADD UNIQUE KEY uk_program_pred_sem_model (program_id, academic_year, semester, model_name)
+            ADD UNIQUE KEY uk_program_year_sem_model (program_id, academic_year, semester, model_name)
         """)
 
 
 def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, predictions_columns):
+    """
+    Writes one row per model per (program, academic_year, semester).
+    Uses UPSERT to keep reruns deterministic.
+    Sets model_ensemble only for Ensemble rows.
+    """
     program_id = int(pred_result['program_id'])
     program_confidence = get_model_confidence(pred_result)
     base_year = 2026
     inserted_count = 0
+
     has_model_name = 'model_name' in predictions_columns
     has_model_ensemble = 'model_ensemble' in predictions_columns
+
+    if not has_model_name:
+        # If schema truly doesn't support model_name, you cannot safely store per-model rows.
+        # But since you want "all models displayed", we hard-fail to make the issue obvious.
+        raise RuntimeError("predictions table is missing model_name column; cannot save per-model predictions.")
 
     model_map = {
         'Prophet': pred_result.get('prophet'),
@@ -773,10 +808,6 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
         'XGBoost': pred_result.get('xgboost'),
         'Ensemble': pred_result.get('ensemble')
     }
-
-    # Older schemas don't include model_name, so store only ensemble rows to avoid insert errors.
-    if not has_model_name:
-        model_map = {'Ensemble': pred_result.get('ensemble')}
 
     for model_name, model_result in model_map.items():
         if not model_result or model_result.get('predictions') is None:
@@ -786,18 +817,21 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
         if model_name == 'Ensemble':
             row_confidence = program_confidence
         else:
-            row_confidence = clip_value((0.65 * model_quality) + (0.35 * program_confidence), CONFIDENCE_MIN, CONFIDENCE_MAX)
+
+            # Slight blend of per-model validation quality + overall program confidence
+            row_confidence = clip_value((0.7 * model_quality) + (0.3 * program_confidence), 0.05, 0.98)
+
 
         predictions = model_result['predictions'][:future_years * 3]
 
         for sem_offset, pred_value in enumerate(predictions):
             sem = (sem_offset % 3) + 1
             year_offset = sem_offset // 3
-            
-            # Skip semester 3 (summer) as requested
+
+            # Keep your existing rule: skip semester 3 (summer)
             if sem == 3:
                 continue
-            
+
             academic_year = f"{base_year + year_offset}-{base_year + year_offset + 1}"
 
             pred_total = int(max(float(pred_value), 0))
@@ -811,7 +845,8 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
                 'predicted_total',
                 'predicted_male',
                 'predicted_female',
-                'confidence'
+                'confidence',
+                'model_name'
             ]
             values = [
                 program_id,
@@ -820,22 +855,37 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
                 pred_total,
                 pred_male,
                 pred_female,
-                row_confidence
+                row_confidence,
+                model_name
             ]
 
+            # model_ensemble should describe the ensemble combination only for ensemble rows
             if has_model_ensemble:
                 columns.append('model_ensemble')
-                values.append('Prophet+LSTM+XGBoost')
-
-            if has_model_name:
-                columns.append('model_name')
-                values.append(model_name)
+                values.append(ENSEMBLE_LABEL if model_name == 'Ensemble' else None)
 
             placeholders = ', '.join(['%s'] * len(values))
             columns_sql = ', '.join(columns)
 
+            # UPSERT to avoid duplicate key errors and ensure reruns update rows instead of failing.
+            # Note: model_name is part of the UNIQUE key so it should not be updated.
+            update_cols = [
+                'predicted_total=VALUES(predicted_total)',
+                'predicted_male=VALUES(predicted_male)',
+                'predicted_female=VALUES(predicted_female)',
+                'confidence=VALUES(confidence)'
+            ]
+            if has_model_ensemble:
+                update_cols.append('model_ensemble=VALUES(model_ensemble)')
+
+            update_sql = ", ".join(update_cols)
+
             cursor.execute(
-                f"INSERT INTO predictions ({columns_sql}) VALUES ({placeholders})",
+                f"""
+                INSERT INTO predictions ({columns_sql})
+                VALUES ({placeholders})
+                ON DUPLICATE KEY UPDATE {update_sql}
+                """,
                 tuple(values)
             )
             inserted_count += 1
@@ -857,9 +907,10 @@ def save_predictions_to_db(all_predictions, future_years=1, gender_ratio_map=Non
         ensure_predictions_schema(cursor)
         predictions_columns = get_table_columns(cursor, 'predictions')
 
+        # Clear predictions for the target years (keeps retrains deterministic)
         for year_offset in range(future_years):
             target_year = 2026 + year_offset
-            cursor.execute(f"DELETE FROM predictions WHERE academic_year LIKE '{target_year}-%'")
+            cursor.execute("DELETE FROM predictions WHERE academic_year LIKE %s", (f"{target_year}-%",))
 
         conn.commit()
         print("✅ Cleared existing predictions")
@@ -887,6 +938,7 @@ def save_predictions_to_db(all_predictions, future_years=1, gender_ratio_map=Non
     except Exception as e:
         print(f"❌ Database error: {str(e)}")
         conn.rollback()
+        raise
 
     finally:
         cursor.close()
@@ -948,6 +1000,7 @@ def save_model_metrics_to_db(all_predictions):
     except Exception as e:
         print(f"❌ Database error: {str(e)}")
         conn.rollback()
+        raise
 
     finally:
         cursor.close()
