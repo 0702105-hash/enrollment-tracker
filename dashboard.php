@@ -7,7 +7,6 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 <link rel="stylesheet" href="/enrollment-tracker/assets/css/style.css">
-
 </head>
 
 <body>
@@ -27,33 +26,7 @@
 
 <div class="container" id="dashboard" style="display:none;">
 
-    <!-- TOP NAV BAR (NEW) -->
-    <div class="top-navbar">
-        <div class="left">
-            <!-- Brand (ET + Enrollment Tracker). Click toggles sidebar + label -->
-            <button id="brandToggle" class="brand-toggle" type="button" aria-label="Toggle sidebar">
-                <span class="brand-mark">ET</span>
-                <span id="brandText" class="brand-text">Enrollment Tracker</span>
-            </button>
-
-            <!-- Optional explicit toggle button -->
-            <button id="topSidebarToggle" class="sidebar-toggle-btn" type="button" aria-label="Toggle sidebar">◀</button>
-        </div>
-
-        <div class="profile-area">
-            <span id="profileName" class="profile-name">Admin</span>
-            <span id="profileAvatar" class="profile-avatar">A</span>
-        </div>
-    </div>
-
-    <!-- HEADER BANNER (UPDATED TEXT) -->
-    <div id="headerBanner" class="header-banner">
-        <h1 id="greetingText">Good morning, Admin</h1>
-        <p id="todayText">Today is —</p>
-        <p id="termText">Second Semester, S.Y 2025 - 2026</p>
-    </div>
-
-    <!-- Mobile menu button stays (used on small screens) -->
+    <!-- Mobile menu button (small screens) -->
     <div class="dashboard-topbar">
         <button id="mobileNavToggle" class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false">
             <span class="icon">☰</span>
@@ -64,11 +37,13 @@
     <div id="navOverlay" class="nav-overlay"></div>
 
     <div class="dashboard-layout">
+        <!-- SIDEBAR -->
         <aside id="sideNav" class="card side-nav">
             <div class="side-nav-header">
                 <h3>Dashboard Menu</h3>
                 <button id="desktopNavToggle" class="side-nav-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true">◀</button>
             </div>
+
             <div class="tabs">
                 <button class="tab-btn active" data-tab="overview"><span class="tab-icon">📊</span><span class="tab-text">Overview</span></button>
                 <button class="tab-btn" data-tab="enrollments"><span class="tab-icon">👥</span><span class="tab-text">Enrollments</span></button>
@@ -78,289 +53,300 @@
             </div>
         </aside>
 
+        <!-- MAIN CONTENT -->
         <main class="main-panel">
-    <div id="overview" class="tab-content active">
-        <div class="summary-grid" id="summaryGrid"></div>
+            <!-- TOP NAVBAR (MAIN ONLY) -->
+            <div class="main-topbar">
+                <div class="left">
+                    <button id="brandToggle" class="brand-toggle" type="button" aria-label="Toggle sidebar">
+                        <span class="brand-logo">ET</span>
+                        <span class="brand-name">Enrollment Tracker</span>
+                    </button>
 
-        <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
-                <h2>📊 All Programs Combined Enrollment Trend</h2>
-                <div class="select-container" style="margin:0;">
-                    <select id="overviewYearFilter" style="flex:1;max-width:180px;">
-                        <option value="">All Years</option>
-                    </select>
-                    <select id="overviewYearStart" style="flex:1;max-width:180px;">
-                        <option value="">Start Year</option>
-                    </select>
-                    <select id="overviewYearEnd" style="flex:1;max-width:180px;">
-                        <option value="">End Year</option>
-                    </select>
-                    <select id="overviewSemesterFilter" style="flex:1;max-width:160px;">
-                        <option value="">All Semesters</option>
-                        <option value="1">Semester 1</option>
-                        <option value="2">Semester 2</option>
-                        <option value="12">Semester 1 & 2</option>
-                        <option value="3">Semester 3</option>
-                    </select>
-                    <button onclick="tracker.refreshCombinedChart()" style="margin:0;">🔄 Refresh</button>
-                </div>
-            </div>
-            <div class="chart-container" style="height:400px;">
-                <canvas id="combinedChart"></canvas>
-            </div>
-        </div>
-
-        <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                <h2>📈 Enrollment Trends by Program</h2>
-                <button onclick="tracker.loadAllProgramsCharts()" style="margin:0;">🔄 Refresh</button>
-            </div>
-            <div id="status" class="status"></div>
-            <div class="programs-charts-grid" id="programsChartsGrid">
-                <div class="text-center" style="padding:40px;grid-column:1/-1;">Loading charts...</div>
-            </div>
-        </div>
-    </div>
-
-    <div id="enrollments" class="tab-content">
-        <div class="card">
-            <h2>📋 Enrollment Records</h2>
-            
-            <div class="select-container">
-                <select id="enrollProgramFilter">
-                    <option value="">All Programs</option>
-                </select>
-                <select id="enrollYearFilter">
-                    <option value="">All Years</option>
-                </select>
-                <button onclick="tracker.refreshEnrollmentsTable()">🔄 Refresh</button>
-                <button id="logoutBtn" style="background:#e53e3e;margin-left:auto;">🚪 Logout</button>
-            </div>
-
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th class="sortable" data-sort="program">Program <span class="sort-indicator"></span></th>
-                            <th class="sortable" data-sort="academic_year">Academic Year <span class="sort-indicator"></span></th>
-                            <th class="sortable" data-sort="semester">Semester <span class="sort-indicator"></span></th>
-                            <th class="sortable" data-sort="male">Male <span class="sort-indicator"></span></th>
-                            <th class="sortable" data-sort="female">Female <span class="sort-indicator"></span></th>
-                            <th class="sortable" data-sort="total">Total <span class="sort-indicator"></span></th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="enrollmentsTable">
-                        <tr><td colspan="7" class="text-center">Loading...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <div id="add-enrollment" class="tab-content">
-        <div class="card">
-            <h2>➕ Add New Enrollment Record</h2>
-            
-            <form id="addEnrollmentForm" onsubmit="tracker.handleAddEnrollment(event)">
-                <div class="form-group">
-                    <label>Program <span style="color:red">*</span></label>
-                    <select id="formProgram" required style="width:100%;" onchange="tracker.updateAvailableYears()">
-                        <option value="">Select a program</option>
-                    </select>
+                    <button id="topSidebarToggle" class="icon-btn" type="button" aria-label="Toggle sidebar">☰</button>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Academic Year <span style="color:red">*</span></label>
-                        <select id="formYear" required style="width:100%;">
-                            <option value="">Select academic year</option>
+                <div class="profile-area">
+                    <span id="profileName" class="profile-name">Admin</span>
+                    <span id="profileAvatar" class="profile-avatar">A</span>
+                </div>
+            </div>
+
+            <!-- HERO BANNER (PART OF MAIN CONTENT) -->
+            <div id="headerBanner" class="hero-banner">
+                <h1 id="greetingText">Good morning, Admin</h1>
+                <p id="todayText">Today is —</p>
+                <p id="termText">Second Semester, S.Y 2025 - 2026</p>
+            </div>
+
+            <div id="overview" class="tab-content active">
+                <div class="summary-grid" id="summaryGrid"></div>
+
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
+                        <h2>📊 All Programs Combined Enrollment Trend</h2>
+                        <div class="select-container" style="margin:0;">
+                            <select id="overviewYearFilter" style="flex:1;max-width:180px;">
+                                <option value="">All Years</option>
+                            </select>
+                            <select id="overviewYearStart" style="flex:1;max-width:180px;">
+                                <option value="">Start Year</option>
+                            </select>
+                            <select id="overviewYearEnd" style="flex:1;max-width:180px;">
+                                <option value="">End Year</option>
+                            </select>
+                            <select id="overviewSemesterFilter" style="flex:1;max-width:160px;">
+                                <option value="">All Semesters</option>
+                                <option value="1">Semester 1</option>
+                                <option value="2">Semester 2</option>
+                                <option value="12">Semester 1 & 2</option>
+                                <option value="3">Semester 3</option>
+                            </select>
+                            <button onclick="tracker.refreshCombinedChart()" style="margin:0;">🔄 Refresh</button>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height:400px;">
+                        <canvas id="combinedChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                        <h2>📈 Enrollment Trends by Program</h2>
+                        <button onclick="tracker.loadAllProgramsCharts()" style="margin:0;">🔄 Refresh</button>
+                    </div>
+                    <div id="status" class="status"></div>
+                    <div class="programs-charts-grid" id="programsChartsGrid">
+                        <div class="text-center" style="padding:40px;grid-column:1/-1;">Loading charts...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="enrollments" class="tab-content">
+                <div class="card">
+                    <h2>📋 Enrollment Records</h2>
+                    
+                    <div class="select-container">
+                        <select id="enrollProgramFilter">
+                            <option value="">All Programs</option>
                         </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Semester <span style="color:red">*</span></label>
-                        <select id="formSemester" required style="width:100%;">
-                            <option value="">Select semester</option>
-                            <option value="1">First</option>
-                            <option value="2">Second</option>
-                            <option value="3">Summer</option>
+                        <select id="enrollYearFilter">
+                            <option value="">All Years</option>
                         </select>
+                        <button onclick="tracker.refreshEnrollmentsTable()">🔄 Refresh</button>
+                        <button id="logoutBtn" style="background:#e53e3e;margin-left:auto;">🚪 Logout</button>
+                    </div>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="sortable" data-sort="program">Program <span class="sort-indicator"></span></th>
+                                    <th class="sortable" data-sort="academic_year">Academic Year <span class="sort-indicator"></span></th>
+                                    <th class="sortable" data-sort="semester">Semester <span class="sort-indicator"></span></th>
+                                    <th class="sortable" data-sort="male">Male <span class="sort-indicator"></span></th>
+                                    <th class="sortable" data-sort="female">Female <span class="sort-indicator"></span></th>
+                                    <th class="sortable" data-sort="total">Total <span class="sort-indicator"></span></th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="enrollmentsTable">
+                                <tr><td colspan="7" class="text-center">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="add-enrollment" class="tab-content">
+                <div class="card">
+                    <h2>➕ Add New Enrollment Record</h2>
+                    
+                    <form id="addEnrollmentForm" onsubmit="tracker.handleAddEnrollment(event)">
+                        <div class="form-group">
+                            <label>Program <span style="color:red">*</span></label>
+                            <select id="formProgram" required style="width:100%;" onchange="tracker.updateAvailableYears()">
+                                <option value="">Select a program</option>
+                            </select>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Academic Year <span style="color:red">*</span></label>
+                                <select id="formYear" required style="width:100%;">
+                                    <option value="">Select academic year</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Semester <span style="color:red">*</span></label>
+                                <select id="formSemester" required style="width:100%;">
+                                    <option value="">Select semester</option>
+                                    <option value="1">First</option>
+                                    <option value="2">Second</option>
+                                    <option value="3">Summer</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Male Students <span style="color:red">*</span></label>
+                                <input type="number" id="formMale" min="0" required style="width:100%;">
+                            </div>
+                            <div class="form-group">
+                                <label>Female Students <span style="color:red">*</span></label>
+                                <input type="number" id="formFemale" min="0" required style="width:100%;">
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn-success">✅ Add Enrollment</button>
+                            <button type="reset">🔄 Clear</button>
+                        </div>
+                    </form>
+
+                    <div id="addStatus" class="status"></div>
+                </div>
+
+                <div class="card">
+                    <h2>📝 Recently Added</h2>
+                    <div id="recentList"></div>
+                </div>
+            </div>
+
+            <div id="predictions" class="tab-content">
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
+                        <h2>📊 All Programs Combined Enrollment Trend</h2>
+                        <div class="select-container" style="margin:0;">
+                            <select id="predSemesterFilter" style="flex:1;max-width:160px;">
+                                <option value="">All Semesters</option>
+                                <option value="1">Semester 1</option>
+                                <option value="2">Semester 2</option>
+                                <option value="12">Semester 1 &amp; 2</option>
+                                <option value="3">Semester 3</option>
+                            </select>
+                            <select id="predModelFilter" style="flex:1;max-width:160px;">
+                                <option value="Ensemble">Ensemble</option>
+                                <option value="Prophet">Prophet</option>
+                                <option value="LSTM">LSTM</option>
+                                <option value="XGBoost">XGBoost</option>
+                            </select>
+                            <button onclick="tracker.refreshPredCombinedChart()" style="margin:0;">🔄 Refresh</button>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height:400px;">
+                        <canvas id="predCombinedChart"></canvas>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Male Students <span style="color:red">*</span></label>
-                        <input type="number" id="formMale" min="0" required style="width:100%;">
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
+                        <h2>📈 Enrollment Trends by Program</h2>
+                        <div class="select-container" style="margin:0;">
+                            <select id="predProgModelFilter" style="flex:1;max-width:160px;">
+                                <option value="Ensemble">Ensemble</option>
+                                <option value="Prophet">Prophet</option>
+                                <option value="LSTM">LSTM</option>
+                                <option value="XGBoost">XGBoost</option>
+                            </select>
+                            <button onclick="tracker.refreshPredByProgramCharts()" style="margin:0;">🔄 Refresh</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Female Students <span style="color:red">*</span></label>
-                        <input type="number" id="formFemale" min="0" required style="width:100%;">
+                    <div class="programs-charts-grid" id="predProgramsChartsGrid">
+                        <div class="text-center" style="padding:40px;grid-column:1/-1;color:#718096;">Loading charts...</div>
                     </div>
                 </div>
 
-                <div class="form-actions">
-                    <button type="submit" class="btn-success">✅ Add Enrollment</button>
-                    <button type="reset">🔄 Clear</button>
-                </div>
-            </form>
+                <div class="card">
+                    <h2>🔮 Per-Program Prediction Detail</h2>
+                    <div class="select-container">
+                        <label style="font-weight:700;">Select Program:</label>
+                        <select id="predProgramFilter" style="flex:1;max-width:400px;">
+                            <option value="">Choose a program</option>
+                        </select>
+                        <button onclick="tracker.refreshPredictions()">🔄 Load Detail</button>
+                    </div>
 
-            <div id="addStatus" class="status"></div>
-        </div>
+                    <div id="predictionChartContainer" class="card" style="margin-top:20px;display:none;">
+                        <h3 id="predictionChartTitle"></h3>
+                        <div id="predictionLegend" class="custom-legend" style="display:none;"></div>
+                        <div id="availableModels" class="available-models" style="display:none;"></div>
+                        <div class="chart-container">
+                            <canvas id="predictionChart"></canvas>
+                        </div>
+                    </div>
 
-        <div class="card">
-            <h2>📝 Recently Added</h2>
-            <div id="recentList"></div>
-        </div>
-    </div>
+                    <div id="predictionCompareContainer" class="card" style="margin-top:20px;display:none;">
+                        <h3>📋 Prediction Comparison by Algorithm</h3>
+                        <div class="prediction-table-wrap">
+                            <table class="prediction-compare-table">
+                                <thead>
+                                    <tr>
+                                        <th>Period</th>
+                                        <th style="color:#D81B60;">Prophet</th>
+                                        <th style="color:#FF6F00;">LSTM</th>
+                                        <th style="color:#6D4C41;">XGBoost</th>
+                                        <th style="color:#00897B;">Ensemble</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="predictionCompareTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
 
-    <div id="predictions" class="tab-content">
-
-        <!-- Combined predicted + historical chart — mirrors overview combined chart -->
-        <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
-                <h2>📊 All Programs Combined Enrollment Trend</h2>
-                <div class="select-container" style="margin:0;">
-                    <select id="predSemesterFilter" style="flex:1;max-width:160px;">
-                        <option value="">All Semesters</option>
-                        <option value="1">Semester 1</option>
-                        <option value="2">Semester 2</option>
-                        <option value="12">Semester 1 &amp; 2</option>
-                        <option value="3">Semester 3</option>
-                    </select>
-                    <select id="predModelFilter" style="flex:1;max-width:160px;">
-                        <option value="Ensemble">Ensemble</option>
-                        <option value="Prophet">Prophet</option>
-                        <option value="LSTM">LSTM</option>
-                        <option value="XGBoost">XGBoost</option>
-                    </select>
-                    <button onclick="tracker.refreshPredCombinedChart()" style="margin:0;">🔄 Refresh</button>
-                </div>
-            </div>
-            <div class="custom-legend" id="predCombinedLegend" style="margin-bottom:16px;">
-                <div class="legend-item"><span class="legend-line" style="background:#ed8936;"></span>Historical Total</div>
-                <div class="legend-item"><span class="legend-line" style="background:#2b6cb0;"></span>Historical Male</div>
-                <div class="legend-item"><span class="legend-line" style="background:#d53f8c;"></span>Historical Female</div>
-                <div class="legend-item"><span class="legend-line" style="background:#ed8936;border-top:3px dashed #ed8936;height:0;width:24px;display:inline-block;vertical-align:middle;"></span>Predicted Total</div>
-                <div class="legend-item"><span class="legend-line" style="background:#2b6cb0;border-top:3px dashed #2b6cb0;height:0;width:24px;display:inline-block;vertical-align:middle;"></span>Predicted Male</div>
-                <div class="legend-item"><span class="legend-line" style="background:#d53f8c;border-top:3px dashed #d53f8c;height:0;width:24px;display:inline-block;vertical-align:middle;"></span>Predicted Female</div>
-            </div>
-            <div class="chart-container" style="height:400px;">
-                <canvas id="predCombinedChart"></canvas>
-            </div>
-        </div>
-
-        <!-- Per-program predicted + historical charts grid — mirrors overview programs grid -->
-        <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px;">
-                <h2>📈 Enrollment Trends by Program</h2>
-                <div class="select-container" style="margin:0;">
-                    <select id="predProgModelFilter" style="flex:1;max-width:160px;">
-                        <option value="Ensemble">Ensemble</option>
-                        <option value="Prophet">Prophet</option>
-                        <option value="LSTM">LSTM</option>
-                        <option value="XGBoost">XGBoost</option>
-                    </select>
-                    <button onclick="tracker.refreshPredByProgramCharts()" style="margin:0;">🔄 Refresh</button>
-                </div>
-            </div>
-            <div class="programs-charts-grid" id="predProgramsChartsGrid">
-                <div class="text-center" style="padding:40px;grid-column:1/-1;color:#718096;">Loading charts...</div>
-            </div>
-        </div>
-
-        <!-- Per-program deep-dive: select one program, see all 4 model predictions -->
-        <div class="card">
-            <h2>🔮 Per-Program Prediction Detail</h2>
-            <div class="select-container">
-                <label style="font-weight:600;">Select Program:</label>
-                <select id="predProgramFilter" style="flex:1;max-width:400px;">
-                    <option value="">Choose a program</option>
-                </select>
-                <button onclick="tracker.refreshPredictions()">🔄 Load Detail</button>
-            </div>
-
-            <div id="predictionChartContainer" class="card" style="margin-top:20px;display:none;">
-                <h3 id="predictionChartTitle"></h3>
-                <div id="predictionLegend" class="custom-legend" style="display:none;"></div>
-                <div id="availableModels" class="available-models" style="display:none;"></div>
-                <div class="chart-container">
-                    <canvas id="predictionChart"></canvas>
+                    <div id="predictionStatsContainer" style="margin-top:20px;display:none;">
+                        <div class="predictions-grid" id="predictionsGrid"></div>
+                    </div>
                 </div>
             </div>
 
-            <div id="predictionCompareContainer" class="card" style="margin-top:20px;display:none;">
-                <h3>📋 Prediction Comparison by Algorithm</h3>
-                <div class="prediction-table-wrap">
-                    <table class="prediction-compare-table">
-                        <thead>
-                            <tr>
-                                <th>Period</th>
-                                <th style="color:#D81B60;">Prophet</th>
-                                <th style="color:#FF6F00;">LSTM</th>
-                                <th style="color:#6D4C41;">XGBoost</th>
-                                <th style="color:#00897B;">Ensemble</th>
-                            </tr>
-                        </thead>
-                        <tbody id="predictionCompareTableBody"></tbody>
-                    </table>
+            <div id="evaluation" class="tab-content">
+                <div class="card">
+                    <h2>📊 Model Evaluation Metrics</h2>
+                    <div class="select-container">
+                        <label>Select Program:</label>
+                        <select id="evaluationProgramFilter" style="flex:1;max-width:400px;">
+                            <option value="">Choose a program</option>
+                        </select>
+                        <button onclick="tracker.loadEvaluationMetrics()">🔄 Load Metrics</button>
+                    </div>
+
+                    <div id="comparisonContainer" style="display:none;">
+                        <h3 style="margin:30px 0 15px 0;">Common Metrics</h3>
+                        <table class="comparison-table">
+                            <thead>
+                                <tr>
+                                    <th>Metric</th>
+                                    <th style="color:#f093fb;">Prophet</th>
+                                    <th style="color:#ed8936;">LSTM</th>
+                                    <th style="color:#6D4C41;">XGBoost</th>
+                                    <th style="color:#2f855a;">Best Model</th>
+                                </tr>
+                            </thead>
+                            <tbody id="commonMetricsTable"></tbody>
+                        </table>
+
+                        <h3 style="margin:30px 0 15px 0;">Detailed Model Metrics</h3>
+                        <div class="metrics-container" id="modelCardsContainer"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>📘 Metrics Guide</h2>
+                    <div class="metric-section" style="border-left-color:#667eea;">
+                        <h3>Common Metrics</h3>
+                        <div class="metric-description">
+                            <strong>MAE</strong> = Mean Absolute Error, lower is better.<br>
+                            <strong>RMSE</strong> = Root Mean Squared Error, lower is better.<br>
+                            <strong>MAPE</strong> = Mean Absolute Percentage Error, lower is better.<br>
+                            <strong>R²</strong> = Coefficient of Determination, higher is better.<br>
+                            <strong>RMSLE</strong> = Root Mean Squared Log Error, lower is better.<br>
+                            <strong>Theil_U</strong> = compares against a naive forecast, lower is better.
+                        </div>
+                    </div>
                 </div>
             </div>
-
-            <div id="predictionStatsContainer" style="margin-top:20px;display:none;">
-                <div class="predictions-grid" id="predictionsGrid"></div>
-            </div>
-        </div>
-    </div>
-
-    <div id="evaluation" class="tab-content">
-        <div class="card">
-            <h2>📊 Model Evaluation Metrics</h2>
-            
-            <div class="select-container">
-                <label>Select Program:</label>
-                <select id="evaluationProgramFilter" style="flex:1;max-width:400px;">
-                    <option value="">Choose a program</option>
-                </select>
-                <button onclick="tracker.loadEvaluationMetrics()">🔄 Load Metrics</button>
-            </div>
-
-            <div id="comparisonContainer" style="display:none;">
-                <h3 style="margin:30px 0 15px 0;">Common Metrics</h3>
-                <table class="comparison-table">
-                    <thead>
-                        <tr>
-                            <th>Metric</th>
-                            <th style="color:#f093fb;">Prophet</th>
-                            <th style="color:#ed8936;">LSTM</th>
-                            <th style="color:#6D4C41;">XGBoost</th>
-                            <th style="color:#2f855a;">Best Model</th>
-                        </tr>
-                    </thead>
-                    <tbody id="commonMetricsTable"></tbody>
-                </table>
-
-                <h3 style="margin:30px 0 15px 0;">Detailed Model Metrics</h3>
-                <div class="metrics-container" id="modelCardsContainer"></div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2>📘 Metrics Guide</h2>
-
-            <div class="metric-section" style="border-left-color:#667eea;">
-                <h3>Common Metrics</h3>
-                <div class="metric-description">
-                    <strong>MAE</strong> = Mean Absolute Error, lower is better.<br>
-                    <strong>RMSE</strong> = Root Mean Squared Error, lower is better.<br>
-                    <strong>MAPE</strong> = Mean Absolute Percentage Error, lower is better.<br>
-                    <strong>R²</strong> = Coefficient of Determination, higher is better.<br>
-                    <strong>RMSLE</strong> = Root Mean Squared Log Error, lower is better.<br>
-                    <strong>Theil_U</strong> = compares against a naive forecast, lower is better.
-                </div>
-            </div>
-        </div>
-    </div>
 
         </main>
     </div>
@@ -473,7 +459,6 @@ class EnrollmentTracker{
     setupTopNavbar(){
         const brandToggle = document.getElementById('brandToggle');
         const topSidebarToggle = document.getElementById('topSidebarToggle');
-        const brandText = document.getElementById('brandText');
 
         const profileName = document.getElementById('profileName');
         const profileAvatar = document.getElementById('profileAvatar');
@@ -485,21 +470,14 @@ class EnrollmentTracker{
             // desktop collapse
             if(this.layoutEl && !window.matchMedia('(max-width: 768px)').matches){
                 this.toggleDesktopNav();
-
-                if(brandText) brandText.classList.toggle('collapsed', this.navCollapsed);
-                if(topSidebarToggle) topSidebarToggle.textContent = this.navCollapsed ? '▶' : '◀';
                 return;
             }
-
             // mobile open/close
             this.toggleMobileNav();
         };
 
         brandToggle?.addEventListener('click', doToggle);
         topSidebarToggle?.addEventListener('click', doToggle);
-
-        // initial state sync
-        if(brandText) brandText.classList.toggle('collapsed', this.navCollapsed);
     }
 
     updateGreetingHeader(){
@@ -628,7 +606,7 @@ class EnrollmentTracker{
     applyTimeBasedBackground(){
         const now = new Date();
         const minutes = now.getHours() * 60 + now.getMinutes();
-        const headerBanner = document.querySelector('.header-banner');
+        const headerBanner = document.getElementById('headerBanner');
 
         if(!headerBanner) return;
 
