@@ -27,11 +27,33 @@
 
 <div class="container" id="dashboard" style="display:none;">
 
-    <div class="header-banner">
-        <h1>📊 Enrollment Tracker System</h1>
-        <p>Charts, predictions, and evaluation metrics</p>
+    <!-- TOP NAV BAR (NEW) -->
+    <div class="top-navbar">
+        <div class="left">
+            <!-- Brand (ET + Enrollment Tracker). Click toggles sidebar + label -->
+            <button id="brandToggle" class="brand-toggle" type="button" aria-label="Toggle sidebar">
+                <span class="brand-mark">ET</span>
+                <span id="brandText" class="brand-text">Enrollment Tracker</span>
+            </button>
+
+            <!-- Optional explicit toggle button -->
+            <button id="topSidebarToggle" class="sidebar-toggle-btn" type="button" aria-label="Toggle sidebar">◀</button>
+        </div>
+
+        <div class="profile-area">
+            <span id="profileName" class="profile-name">Admin</span>
+            <span id="profileAvatar" class="profile-avatar">A</span>
+        </div>
     </div>
 
+    <!-- HEADER BANNER (UPDATED TEXT) -->
+    <div id="headerBanner" class="header-banner">
+        <h1 id="greetingText">Good morning, Admin</h1>
+        <p id="todayText">Today is —</p>
+        <p id="termText">Second Semester, S.Y 2025 - 2026</p>
+    </div>
+
+    <!-- Mobile menu button stays (used on small screens) -->
     <div class="dashboard-topbar">
         <button id="mobileNavToggle" class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false">
             <span class="icon">☰</span>
@@ -419,6 +441,10 @@ class EnrollmentTracker{
         this.sortColumn = null;
         this.sortDirection = 'asc';
         this.navCollapsed = false;
+
+        // TODO later: replace with session-based name when login is implemented
+        this.userName = 'Admin';
+
         this.init();
     }
 
@@ -426,6 +452,13 @@ class EnrollmentTracker{
 <?php if (isset($_GET['login'])): ?>
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('dashboard').style.display='block';
+
+            // NEW: top navbar + greeting banner text
+            this.setupTopNavbar();
+            this.updateGreetingHeader();
+            setInterval(() => this.updateGreetingHeader(), 60000);
+
+            // existing
             this.startBackgroundScheduler();
             this.setupTabs();
             this.setupSideNav();
@@ -434,6 +467,63 @@ class EnrollmentTracker{
             this.setupEnrollmentsSorting();
         });
 <?php endif; ?>
+    }
+
+    // ========== NEW: Top navbar ==========
+    setupTopNavbar(){
+        const brandToggle = document.getElementById('brandToggle');
+        const topSidebarToggle = document.getElementById('topSidebarToggle');
+        const brandText = document.getElementById('brandText');
+
+        const profileName = document.getElementById('profileName');
+        const profileAvatar = document.getElementById('profileAvatar');
+
+        if(profileName) profileName.textContent = this.userName;
+        if(profileAvatar) profileAvatar.textContent = (this.userName || 'U').trim().charAt(0).toUpperCase();
+
+        const doToggle = () => {
+            // desktop collapse
+            if(this.layoutEl && !window.matchMedia('(max-width: 768px)').matches){
+                this.toggleDesktopNav();
+
+                if(brandText) brandText.classList.toggle('collapsed', this.navCollapsed);
+                if(topSidebarToggle) topSidebarToggle.textContent = this.navCollapsed ? '▶' : '◀';
+                return;
+            }
+
+            // mobile open/close
+            this.toggleMobileNav();
+        };
+
+        brandToggle?.addEventListener('click', doToggle);
+        topSidebarToggle?.addEventListener('click', doToggle);
+
+        // initial state sync
+        if(brandText) brandText.classList.toggle('collapsed', this.navCollapsed);
+    }
+
+    updateGreetingHeader(){
+        const now = new Date();
+        const h = now.getHours();
+
+        let greeting = 'Good morning';
+        if(h >= 12 && h < 18) greeting = 'Good afternoon';
+        if(h >= 18) greeting = 'Good evening';
+
+        const longDate = now.toLocaleDateString('en-US', {
+            weekday:'long',
+            year:'numeric',
+            month:'long',
+            day:'numeric'
+        });
+
+        const greetingEl = document.getElementById('greetingText');
+        const todayEl = document.getElementById('todayText');
+        const termEl = document.getElementById('termText');
+
+        if(greetingEl) greetingEl.textContent = `${greeting}, ${this.userName}`;
+        if(todayEl) todayEl.textContent = `Today is ${longDate}`;
+        if(termEl) termEl.textContent = `Second Semester, S.Y 2025 - 2026`;
     }
 
     setupTabs(){
