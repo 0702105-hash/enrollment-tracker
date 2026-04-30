@@ -1,3 +1,4 @@
+import os
 import time
 import warnings
 
@@ -7,14 +8,24 @@ import pandas as pd
 
 warnings.filterwarnings('ignore')
 
+# Reduce TensorFlow startup noise and keep deterministic CPU behavior by default.
+os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')
+os.environ.setdefault('TF_ENABLE_ONEDNN_OPTS', '0')
+
 from prophet import Prophet
+from prediction_config import PROPHET_CONFIG
+from sklearn.compose import TransformedTargetRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+import tensorflow as tf
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 from xgboost import XGBRegressor
+
+tf.get_logger().setLevel('ERROR')
 
 print("=" * 80)
 print("🔮 MULTI-MODEL ENROLLMENT PREDICTION SYSTEM (2026-2027 & 2027-2028)")
@@ -40,6 +51,86 @@ PROGRAM_NAMES = {
 }
 # Canonical ensemble label used everywhere (DB, API defaults, UI labels)
 ENSEMBLE_LABEL = "Prophet+LSTM+XGBoost"
+CONFIDENCE_MIN = 0.05
+CONFIDENCE_MAX = 0.98
+
+SEMESTER_MONTH_MAP = {
+    1: 8,
+    2: 1,
+    3: 6
+}
+SEMESTER_ORDER = (1, 2, 3)
+PROPHET_FREQ = '4MS'
+PROPHET_CUSTOM_SEASONALITY = {
+    'name': PROPHET_CONFIG.get('custom_seasonality_name', 'academic_cycle'),
+    'period': float(PROPHET_CONFIG.get('custom_seasonality_period', 365.25)),
+    'fourier_order': int(PROPHET_CONFIG.get('custom_seasonality_fourier_order', 3)),
+    'prior_scale': float(PROPHET_CONFIG.get('custom_seasonality_prior_scale', 10.0))
+}
+
+
+def parse_academic_year_start(academic_year):
+    try:
+        return int(str(academic_year).split('-')[0])
+    except (TypeError, ValueError, IndexError):
+        return np.nan
+
+
+def normalize_enrollment_history(df):
+    if df is None or df.empty:
+        return df
+
+    normalized_source = df.copy()
+    normalized_source['academic_year_start'] = normalized_source['academic_year'].apply(parse_academic_year_start)
+
+    if 'male' not in normalized_source.columns:
+        normalized_source['male'] = 0
+    if 'female' not in normalized_source.columns:
+        normalized_source['female'] = 0
+
+    normalized_source['male'] = pd.to_numeric(normalized_source['male'], errors='coerce').fillna(0)
+    normalized_source['female'] = pd.to_numeric(normalized_source['female'], errors='coerce').fillna(0)
+
+    aggregated = normalized_source.groupby(
+        ['program_id', 'academic_year', 'academic_year_start', 'semester'],
+        as_index=False,
+        dropna=False
+    )[['male', 'female']].sum()
+    aggregated['total'] = aggregated['male'] + aggregated['female']
+
+    normalized_rows = []
+    group_columns = ['program_id', 'academic_year', 'academic_year_start']
+    for group_values, group_df in aggregated.groupby(group_columns, sort=False):
+        program_id, academic_year, academic_year_start = group_values
+        semester_lookup = group_df.set_index('semester')
+
+        for semester in SEMESTER_ORDER:
+            if semester in semester_lookup.index:
+                row = semester_lookup.loc[semester]
+                male = float(row['male'])
+                female = float(row['female'])
+                total = float(row['total'])
+            else:
+                male = 0.0
+                female = 0.0
+                total = 0.0
+
+            normalized_rows.append({
+                'program_id': int(program_id),
+                'academic_year': academic_year,
+                'academic_year_start': academic_year_start,
+                'semester': int(semester),
+                'male': male,
+                'female': female,
+                'total': total
+            })
+
+    normalized_df = pd.DataFrame(normalized_rows)
+    normalized_df = normalized_df.sort_values(
+        ['program_id', 'academic_year_start', 'semester', 'academic_year'],
+        kind='mergesort'
+    ).reset_index(drop=True)
+    return normalized_df.drop(columns=['academic_year_start'])
 
 
 def is_valid_metric_value(value):
@@ -50,49 +141,141 @@ def is_valid_metric_value(value):
         return False
 
 
+def get_month_for_semester(semester):
+    return int(SEMESTER_MONTH_MAP.get(int(semester), 1))
+
+
+def make_temporal_feature_row(lag1_total, same_sem_last_year, semester, trend_index):
+    month = get_month_for_semester(semester)
+    sem_angle = 2.0 * np.pi * (float(semester) - 1.0) / 3.0
+    month_angle = 2.0 * np.pi * (float(month) - 1.0) / 12.0
+
+    return np.array([
+        float(lag1_total),
+        float(same_sem_last_year),
+        float(np.sin(sem_angle)),
+        float(np.cos(sem_angle)),
+        float(np.sin(month_angle)),
+        float(np.cos(month_angle)),
+        float(trend_index)
+    ], dtype=float)
+
+
+def build_temporal_supervised(totals, semesters):
+    totals = np.array(totals, dtype=float)
+    semesters = np.array(semesters, dtype=int)
+
+    if len(totals) != len(semesters):
+        raise ValueError("Totals and semesters length mismatch")
+
+    if len(totals) < 2:
+        return np.array([]), np.array([]), np.array([])
+
+    X_rows = []
+    y_values = []
+    target_indices = []
+
+    last_seen_by_sem = {int(semesters[0]): float(totals[0])}
+
+    for t in range(1, len(totals)):
+        sem = int(semesters[t])
+        lag1_total = float(totals[t - 1])
+        same_sem_last_year = float(last_seen_by_sem.get(sem, lag1_total))
+
+        X_rows.append(make_temporal_feature_row(
+            lag1_total=lag1_total,
+            same_sem_last_year=same_sem_last_year,
+            semester=sem,
+            trend_index=t
+        ))
+        y_values.append(float(totals[t]))
+        target_indices.append(t)
+
+        last_seen_by_sem[sem] = float(totals[t])
+
+    return np.array(X_rows, dtype=float), np.array(y_values, dtype=float), np.array(target_indices, dtype=int)
+
+
+def get_next_semester(current_semester):
+    semester = int(current_semester)
+    return 1 if semester == 3 else semester + 1
+
+
+def build_forecast_semester_sequence(steps):
+    return [SEMESTER_ORDER[index % len(SEMESTER_ORDER)] for index in range(int(steps))]
+
+
+def build_last_seen_semester_map(semesters, totals):
+    mapping = {}
+    for sem, total in zip(np.array(semesters, dtype=int), np.array(totals, dtype=float)):
+        mapping[int(sem)] = float(total)
+    return mapping
+
+
 class ModelEvaluator:
     @staticmethod
     def calculate_metrics(y_true, y_pred):
         y_true = np.array(y_true, dtype=float)
-        y_pred = np.array(y_pred, dtype=float)
-        y_pred = np.maximum(y_pred, 0)
+        y_pred_raw = np.array(y_pred, dtype=float)
+        y_pred_clipped = np.maximum(y_pred_raw, 0)
 
-        if len(y_true) == 0 or len(y_pred) == 0:
+        if len(y_true) == 0 or len(y_pred_raw) == 0:
             return {
                 'MAE': np.nan,
                 'RMSE': np.nan,
                 'MAPE': np.nan,
                 'MSE': np.nan,
                 'R²': np.nan,
+                'Raw_R2': np.nan,
+                'Clipped_R2': np.nan,
                 'RMSLE': np.nan,
-                'Theil_U': np.nan
+                'Theil_U': np.nan,
+                'Baseline_R2_Naive': np.nan
             }
 
-        mae = mean_absolute_error(y_true, y_pred)
-        mse = mean_squared_error(y_true, y_pred)
+        mae = mean_absolute_error(y_true, y_pred_raw)
+        mse = mean_squared_error(y_true, y_pred_raw)
         rmse = np.sqrt(mse)
 
         mask = y_true != 0
         if mask.any():
-            mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
+            mape = np.mean(np.abs((y_true[mask] - y_pred_raw[mask]) / y_true[mask])) * 100
         else:
             mape = np.nan
 
-        try:
-            r2 = r2_score(y_true, y_pred)
-        except Exception:
-            r2 = np.nan
+        # R² is undefined when the ground-truth series has zero variance.
+        if np.var(y_true) == 0:
+            raw_r2 = np.nan
+            clipped_r2 = np.nan
+        else:
+            try:
+                raw_r2 = r2_score(y_true, y_pred_raw)
+            except Exception:
+                raw_r2 = np.nan
+            try:
+                clipped_r2 = r2_score(y_true, y_pred_clipped)
+            except Exception:
+                clipped_r2 = np.nan
+
+        # Preserve historical key for downstream consumers; use raw model signal.
+        r2 = raw_r2
 
         log_true = np.log1p(np.maximum(y_true, 0))
-        log_pred = np.log1p(np.maximum(y_pred, 0))
+        log_pred = np.log1p(y_pred_clipped)
         rmsle = np.sqrt(mean_squared_error(log_true, log_pred))
 
         if len(y_true) > 1:
             naive_pred = y_true[:-1]
             naive_rmse = np.sqrt(mean_squared_error(y_true[1:], naive_pred))
             theil_u = rmse / naive_rmse if naive_rmse != 0 else np.nan
+
+            # Time-series aware baseline: compare against one-step naive persistence.
+            model_mse_vs_naive_window = mean_squared_error(y_true[1:], y_pred_raw[1:])
+            naive_mse = mean_squared_error(y_true[1:], naive_pred)
+            baseline_r2_naive = 1 - (model_mse_vs_naive_window / naive_mse) if naive_mse != 0 else np.nan
         else:
             theil_u = np.nan
+            baseline_r2_naive = np.nan
 
         return {
             'MAE': round(float(mae), 2) if is_valid_metric_value(mae) else np.nan,
@@ -100,8 +283,11 @@ class ModelEvaluator:
             'MAPE': round(float(mape), 2) if is_valid_metric_value(mape) else np.nan,
             'MSE': round(float(mse), 2) if is_valid_metric_value(mse) else np.nan,
             'R²': round(float(r2), 4) if is_valid_metric_value(r2) else np.nan,
+            'Raw_R2': round(float(raw_r2), 4) if is_valid_metric_value(raw_r2) else np.nan,
+            'Clipped_R2': round(float(clipped_r2), 4) if is_valid_metric_value(clipped_r2) else np.nan,
             'RMSLE': round(float(rmsle), 4) if is_valid_metric_value(rmsle) else np.nan,
-            'Theil_U': round(float(theil_u), 4) if is_valid_metric_value(theil_u) else np.nan
+            'Theil_U': round(float(theil_u), 4) if is_valid_metric_value(theil_u) else np.nan,
+            'Baseline_R2_Naive': round(float(baseline_r2_naive), 4) if is_valid_metric_value(baseline_r2_naive) else np.nan
         }
 
     @staticmethod
@@ -112,15 +298,41 @@ class ModelEvaluator:
 
 
 class ProphetPredictor:
-    def __init__(self, yearly_seasonality=False, weekly_seasonality=False):
+    def __init__(self, yearly_seasonality=PROPHET_CONFIG.get('yearly_seasonality', False), weekly_seasonality=PROPHET_CONFIG.get('weekly_seasonality', False), use_custom_seasonality=PROPHET_CONFIG.get('use_custom_seasonality', True)):
         self.yearly_seasonality = yearly_seasonality
         self.weekly_seasonality = weekly_seasonality
+        self.use_custom_seasonality = use_custom_seasonality
         self.model = None
         self.metrics = {}
+        self.validation_actual = None
+        self.validation_predictions = None
+
+    def _build_model(self, use_custom_seasonality=None):
+        model = Prophet(
+            yearly_seasonality=self.yearly_seasonality,
+            weekly_seasonality=self.weekly_seasonality,
+            interval_width=float(PROPHET_CONFIG.get('interval_width', 0.99)),
+            changepoint_prior_scale=float(PROPHET_CONFIG.get('changepoint_prior_scale', 0.05)),
+            seasonality_mode=PROPHET_CONFIG.get('seasonality_mode', 'additive'),
+            seasonality_prior_scale=float(PROPHET_CONFIG.get('seasonality_prior_scale', 10.0))
+        )
+
+        if use_custom_seasonality is None:
+            use_custom_seasonality = self.use_custom_seasonality
+
+        if use_custom_seasonality:
+            model.add_seasonality(
+                name=PROPHET_CUSTOM_SEASONALITY['name'],
+                period=PROPHET_CUSTOM_SEASONALITY['period'],
+                fourier_order=PROPHET_CUSTOM_SEASONALITY['fourier_order'],
+                prior_scale=PROPHET_CUSTOM_SEASONALITY['prior_scale']
+            )
+
+        return model
 
     def prepare_data(self, values):
         return pd.DataFrame({
-            'ds': pd.date_range(start='2015-01-01', periods=len(values), freq='3MS'),
+            'ds': pd.date_range(start='2015-08-01', periods=len(values), freq=PROPHET_FREQ),
             'y': values
         })
 
@@ -128,28 +340,23 @@ class ProphetPredictor:
         print("      🔧 Training Prophet model...")
         try:
             train_df = self.prepare_data(y_train)
-
-            # Try Prophet with default backend first (faster and more reliable)
             try:
-                self.model = Prophet(
-                    yearly_seasonality=self.yearly_seasonality,
-                    weekly_seasonality=self.weekly_seasonality,
-                    interval_width=0.99
-                )
-            except Exception:
-                # Fallback with CMDSTANPY if available
-                self.model = Prophet(
-                    yearly_seasonality=self.yearly_seasonality,
-                    weekly_seasonality=self.weekly_seasonality,
-                    interval_width=0.99,
-                    stan_backend='CMDSTANPY'
-                )
+                self.model = self._build_model(use_custom_seasonality=self.use_custom_seasonality)
+                self.model.fit(train_df)
+            except ValueError as fit_error:
+                if self.use_custom_seasonality and 'duplicate labels' in str(fit_error).lower():
+                    print("      ⚠️  Prophet custom seasonality triggered duplicate-label reindexing; retrying without it")
+                    self.model = self._build_model(use_custom_seasonality=False)
+                    self.model.fit(train_df)
+                else:
+                    raise
 
-            self.model.fit(train_df)
-
-            future = self.model.make_future_dataframe(periods=len(y_test), freq='3MS')
+            future = self.model.make_future_dataframe(periods=len(y_test), freq=PROPHET_FREQ)
             forecast = self.model.predict(future)
             predictions = forecast['yhat'].tail(len(y_test)).values
+
+            self.validation_actual = np.array(y_test, dtype=float)
+            self.validation_predictions = np.array(predictions, dtype=float)
 
             self.metrics = ModelEvaluator.calculate_metrics(y_test, predictions)
 
@@ -172,7 +379,7 @@ class ProphetPredictor:
             return None
 
         try:
-            future = self.model.make_future_dataframe(periods=steps, freq='3MS')
+            future = self.model.make_future_dataframe(periods=steps, freq=PROPHET_FREQ)
             forecast = self.model.predict(future)
 
             predictions = forecast['yhat'].tail(steps).values
@@ -197,30 +404,37 @@ class LSTMPredictor:
         self.epochs = epochs
         self.batch_size = batch_size
         self.model = None
-        self.scaler = MinMaxScaler(feature_range=(0, 1))
+        self.feature_scaler = StandardScaler()
+        self.target_scaler = StandardScaler()
         self.metrics = {}
+        self.validation_actual = None
+        self.validation_predictions = None
+        self.last_semester = None
+        self.last_trend_index = None
+        self.semester_last_value_map = {}
 
-    def create_sequences(self, data):
+    def create_sequences(self, X_data, y_data):
         X, y, target_indices = [], [], []
-        for i in range(len(data) - self.sequence_length):
-            X.append(data[i:i + self.sequence_length])
-            y.append(data[i + self.sequence_length])
-            target_indices.append(i + self.sequence_length)
+        for i in range(len(X_data) - self.sequence_length + 1):
+            target_pos = i + self.sequence_length - 1
+            X.append(X_data[i:i + self.sequence_length])
+            y.append(y_data[target_pos])
+            target_indices.append(target_pos)
         return np.array(X), np.array(y), np.array(target_indices)
 
-    def train(self, y_train, y_test):
+    def train(self, y_train, y_test, semesters_train, semesters_test):
         print("      🔧 Training LSTM model...")
         try:
-            y_train_arr = np.array(y_train, dtype=float).reshape(-1, 1)
-            y_test_arr = np.array(y_test, dtype=float).reshape(-1, 1)
-            y_all = np.concatenate([y_train_arr, y_test_arr], axis=0)
+            y_train_arr = np.array(y_train, dtype=float)
+            y_test_arr = np.array(y_test, dtype=float)
+            sem_train_arr = np.array(semesters_train, dtype=int)
+            sem_test_arr = np.array(semesters_test, dtype=int)
 
-            # Fit scaler on training history only to avoid look-ahead leakage.
-            self.scaler.fit(y_train_arr)
-            scaled_all = self.scaler.transform(y_all)
+            y_all = np.concatenate([y_train_arr, y_test_arr])
+            sem_all = np.concatenate([sem_train_arr, sem_test_arr])
 
-            X_all, y_all_seq, target_indices = self.create_sequences(scaled_all)
-            if len(X_all) < 1:
+            X_rows, y_rows, target_indices = build_temporal_supervised(y_all, sem_all)
+            if len(X_rows) < 2:
                 print("      ⚠️  Insufficient data for LSTM")
                 return False
 
@@ -228,23 +442,45 @@ class LSTMPredictor:
             train_mask = target_indices < split_point
             test_mask = target_indices >= split_point
 
-            X_train = X_all[train_mask]
-            y_train_seq = y_all_seq[train_mask]
-            X_test = X_all[test_mask]
-            y_test_actual = y_all.flatten()[target_indices[test_mask]]
+            if train_mask.sum() < self.sequence_length + 1 or test_mask.sum() < 1:
+                print("      ⚠️  Insufficient data for LSTM")
+                return False
+
+            X_train_rows = X_rows[train_mask]
+            X_test_rows = X_rows[test_mask]
+
+            self.feature_scaler.fit(X_train_rows)
+            X_train_scaled_rows = self.feature_scaler.transform(X_train_rows)
+            X_test_scaled_rows = self.feature_scaler.transform(X_test_rows)
+
+            y_train_log = np.log1p(np.maximum(y_rows[train_mask], 0.0)).reshape(-1, 1)
+            self.target_scaler.fit(y_train_log)
+            y_train_scaled = self.target_scaler.transform(y_train_log).flatten()
+            y_test_actual = y_rows[test_mask]
+
+            X_train, y_train_seq, _ = self.create_sequences(X_train_scaled_rows, y_train_scaled)
+
+            bridge_rows = np.vstack([X_train_scaled_rows[-(self.sequence_length - 1):], X_test_scaled_rows])
+            X_test, _, _ = self.create_sequences(
+                bridge_rows,
+                np.zeros(len(bridge_rows), dtype=float)
+            )
+            X_test = X_test[:len(X_test_rows)]
 
             if len(X_train) < 2 or len(X_test) < 1:
                 print("      ⚠️  Insufficient data for LSTM")
                 return False
 
+            n_features = int(X_train.shape[2])
+
             self.model = Sequential([
-                LSTM(self.lstm_units, input_shape=(self.sequence_length, 1), recurrent_dropout=0.1),
-                Dropout(0.1),
-                Dense(16, activation='relu'),
+                LSTM(max(8, self.lstm_units // 2), input_shape=(self.sequence_length, n_features), recurrent_dropout=0.15),
+                Dropout(0.20),
+                Dense(8, activation='relu'),
                 Dense(1)
             ])
 
-            self.model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+            self.model.compile(optimizer=Adam(learning_rate=0.0008, clipnorm=1.0), loss='huber')
 
             callbacks = []
             if len(X_train) > 3:
@@ -269,10 +505,14 @@ class LSTMPredictor:
 
             history = self.model.fit(**fit_kwargs)
 
-            predictions_scaled = self.model.predict(X_test, verbose=0)
-            predictions = self.scaler.inverse_transform(predictions_scaled)
+            predictions_scaled = self.model.predict(X_test, verbose=0).reshape(-1, 1)
+            predictions_log = self.target_scaler.inverse_transform(predictions_scaled).flatten()
+            predictions = np.expm1(predictions_log)
 
-            self.metrics = ModelEvaluator.calculate_metrics(y_test_actual, predictions.flatten())
+            self.validation_actual = np.array(y_test_actual, dtype=float)
+            self.validation_predictions = np.array(predictions, dtype=float)
+
+            self.metrics = ModelEvaluator.calculate_metrics(y_test_actual, predictions)
 
             train_loss = history.history['loss'][-1] if history.history.get('loss') else np.nan
             val_loss = history.history['val_loss'][-1] if history.history.get('val_loss') else np.nan
@@ -280,38 +520,70 @@ class LSTMPredictor:
             self.metrics['Training_Loss'] = round(float(train_loss), 4) if is_valid_metric_value(train_loss) else np.nan
             self.metrics['Validation_Loss'] = round(float(val_loss), 4) if is_valid_metric_value(val_loss) else np.nan
 
+            self.last_semester = int(sem_all[-1])
+            self.last_trend_index = int(len(y_all) - 1)
+            self.semester_last_value_map = build_last_seen_semester_map(sem_all, y_all)
+
             return True
         except Exception as e:
             print(f"      ❌ LSTM training error: {str(e)}")
             return False
 
-    def predict(self, y_hist, steps=1):
+    def predict(self, y_hist, semester_hist, steps=1, forecast_semesters=None):
         if self.model is None:
             return None
 
         try:
-            y_hist_all = np.array(y_hist).reshape(-1, 1)
-            scaled_hist = self.scaler.transform(y_hist_all)
-
-            if len(scaled_hist) < self.sequence_length:
+            history_totals = list(np.array(y_hist, dtype=float))
+            history_semesters = list(np.array(semester_hist, dtype=int))
+            if len(history_totals) < self.sequence_length:
                 print("      ⚠️  Not enough history for LSTM prediction")
                 return None
 
-            current_seq = scaled_hist[-self.sequence_length:].reshape(1, self.sequence_length, 1)
+            forecast_semesters = list(forecast_semesters or build_forecast_semester_sequence(steps))
+            if len(forecast_semesters) < int(steps):
+                forecast_semesters.extend(build_forecast_semester_sequence(int(steps) - len(forecast_semesters)))
+
+            sem_last_map = dict(self.semester_last_value_map)
+            current_trend = int(self.last_trend_index if self.last_trend_index is not None else len(history_totals) - 1)
+
+            latest_rows = []
+            for idx in range(len(history_totals) - self.sequence_length + 1, len(history_totals)):
+                sem = int(history_semesters[idx])
+                lag1 = float(history_totals[idx - 1])
+                same_sem = float(sem_last_map.get(sem, lag1))
+                latest_rows.append(make_temporal_feature_row(lag1, same_sem, sem, idx))
+                sem_last_map[sem] = float(history_totals[idx])
+
+            scaled_seed_rows = self.feature_scaler.transform(np.array(latest_rows, dtype=float))
+            current_seq = scaled_seed_rows.reshape(1, self.sequence_length - 1, -1)
+
             predictions = []
 
-            for _ in range(steps):
-                pred_scaled = self.model.predict(current_seq, verbose=0)[0, 0]
-                predictions.append(pred_scaled)
+            for step_index in range(int(steps)):
+                next_sem = int(forecast_semesters[step_index])
+                next_trend = current_trend + 1
+                lag1 = float(history_totals[-1])
+                same_sem = float(sem_last_map.get(next_sem, lag1))
 
-                new_seq = np.append(current_seq[0, 1:, 0], pred_scaled)
-                current_seq = new_seq.reshape(1, self.sequence_length, 1)
+                next_row = make_temporal_feature_row(lag1, same_sem, next_sem, next_trend)
+                next_row_scaled = self.feature_scaler.transform(next_row.reshape(1, -1))[0]
 
-            predictions_array = np.array(predictions).reshape(-1, 1)
-            predictions = self.scaler.inverse_transform(predictions_array)
+                full_seq = np.vstack([current_seq[0], next_row_scaled]).reshape(1, self.sequence_length, -1)
+                pred_scaled = float(self.model.predict(full_seq, verbose=0)[0, 0])
+                pred_log = float(self.target_scaler.inverse_transform(np.array([[pred_scaled]], dtype=float))[0, 0])
+                pred_value = max(float(np.expm1(pred_log)), 0.0)
+                predictions.append(pred_value)
+
+                history_totals.append(pred_value)
+                history_semesters.append(next_sem)
+                sem_last_map[next_sem] = pred_value
+                current_trend = next_trend
+
+                current_seq = np.vstack([current_seq[0][1:], next_row_scaled]).reshape(1, self.sequence_length - 1, -1)
 
             return {
-                'predictions': np.maximum(predictions.flatten(), 0),
+                'predictions': np.array(predictions, dtype=float),
                 'lower_ci': None,
                 'upper_ci': None,
                 'metrics': self.metrics
@@ -327,87 +599,118 @@ class XGBoostPredictor:
         self.model = None
         self.metrics = {}
         self.history_values = None
+        self.validation_actual = None
+        self.validation_predictions = None
+        self.last_semester = None
+        self.last_trend_index = None
+        self.semester_last_value_map = {}
+        self.xgb_params = {
+            'n_estimators': 100,
+            'max_depth': 3,
+            'learning_rate': 0.05,
+            'subsample': 0.9,
+            'colsample_bytree': 0.9,
+            'objective': 'reg:squarederror',
+            'random_state': 42
+        }
 
-    def create_supervised(self, values):
-        X, y = [], []
-        for i in range(self.n_lags, len(values)):
-            X.append(values[i - self.n_lags:i])
-            y.append(values[i])
-        return np.array(X), np.array(y)
+    def build_model(self):
+        # Scales lag features and applies log1p target transform to reduce negative predictions.
+        reg_pipeline = Pipeline([
+            ('scaler', StandardScaler()),
+            ('xgb', XGBRegressor(**self.xgb_params))
+        ])
+        return TransformedTargetRegressor(
+            regressor=reg_pipeline,
+            func=np.log1p,
+            inverse_func=np.expm1,
+            check_inverse=False
+        )
 
-    def train(self, y_train, y_test):
+    def train(self, y_train, y_test, semesters_train, semesters_test):
         print("      🔧 Training XGBoost model...")
         try:
-            full_series = np.concatenate([y_train, y_test]).astype(float)
-            effective_lags = min(self.n_lags, max(1, len(y_train) - 1))
-            self.n_lags = effective_lags
+            y_train_arr = np.array(y_train, dtype=float)
+            y_test_arr = np.array(y_test, dtype=float)
+            sem_train_arr = np.array(semesters_train, dtype=int)
+            sem_test_arr = np.array(semesters_test, dtype=int)
 
-            rolling_test_predictions = []
-            rolling_history = list(y_train.astype(float))
+            full_series = np.concatenate([y_train_arr, y_test_arr]).astype(float)
+            full_semesters = np.concatenate([sem_train_arr, sem_test_arr]).astype(int)
 
-            for actual in y_test:
-                X_roll, y_roll = self.create_supervised(np.array(rolling_history, dtype=float))
-                if len(X_roll) < 1:
-                    print("      ⚠️  Insufficient data for XGBoost")
-                    return False
-
-                model = XGBRegressor(
-                    n_estimators=100,
-                    max_depth=3,
-                    learning_rate=0.05,
-                    subsample=0.9,
-                    colsample_bytree=0.9,
-                    objective='reg:squarederror',
-                    random_state=42
-                )
-                model.fit(X_roll, y_roll)
-
-                x_input = np.array(rolling_history[-self.n_lags:], dtype=float).reshape(1, -1)
-                pred = model.predict(x_input)[0]
-                rolling_test_predictions.append(pred)
-                rolling_history.append(float(actual))
-
-            self.metrics = ModelEvaluator.calculate_metrics(y_test, np.array(rolling_test_predictions))
-            self.history_values = full_series.copy()
-
-            self.model = XGBRegressor(
-                n_estimators=100,
-                max_depth=3,
-                learning_rate=0.05,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                objective='reg:squarederror',
-                random_state=42
-            )
-
-            X_full, y_full = self.create_supervised(full_series)
-            if len(X_full) < 1:
+            X_rows, y_rows, target_indices = build_temporal_supervised(full_series, full_semesters)
+            if len(X_rows) < 2:
                 print("      ⚠️  Insufficient data for final XGBoost fit")
                 return False
 
-            self.model.fit(X_full, y_full)
+            split_point = len(y_train_arr)
+            train_mask = target_indices < split_point
+            test_mask = target_indices >= split_point
+
+            if train_mask.sum() < 2 or test_mask.sum() < 1:
+                print("      ⚠️  Insufficient data for XGBoost")
+                return False
+
+            X_train = X_rows[train_mask]
+            y_train_supervised = y_rows[train_mask]
+            X_test = X_rows[test_mask]
+            y_test_supervised = y_rows[test_mask]
+
+            validate_model = self.build_model()
+            validate_model.fit(X_train, y_train_supervised)
+            test_predictions = validate_model.predict(X_test)
+
+            self.metrics = ModelEvaluator.calculate_metrics(y_test_supervised, np.array(test_predictions, dtype=float))
+            self.validation_actual = np.array(y_test_supervised, dtype=float)
+            self.validation_predictions = np.array(test_predictions, dtype=float)
+            self.history_values = full_series.copy()
+
+            self.model = self.build_model()
+            self.model.fit(X_rows, y_rows)
+
+            self.last_semester = int(full_semesters[-1])
+            self.last_trend_index = int(len(full_series) - 1)
+            self.semester_last_value_map = build_last_seen_semester_map(full_semesters, full_series)
+
             return True
 
         except Exception as e:
             print(f"      ❌ XGBoost training error: {str(e)}")
             return False
 
-    def predict(self, y_hist, steps=1):
+    def predict(self, y_hist, semester_hist, steps=1, forecast_semesters=None):
         if self.model is None:
             return None
 
         try:
-            history = list(np.array(y_hist, dtype=float))
-            if len(history) < self.n_lags:
+            history_totals = list(np.array(y_hist, dtype=float))
+            history_semesters = list(np.array(semester_hist, dtype=int))
+            if len(history_totals) < 2:
                 return None
 
+            forecast_semesters = list(forecast_semesters or build_forecast_semester_sequence(steps))
+            if len(forecast_semesters) < int(steps):
+                forecast_semesters.extend(build_forecast_semester_sequence(int(steps) - len(forecast_semesters)))
+
+            sem_last_map = dict(self.semester_last_value_map)
+            current_trend = int(self.last_trend_index if self.last_trend_index is not None else len(history_totals) - 1)
+
             predictions = []
-            for _ in range(steps):
-                x_input = np.array(history[-self.n_lags:], dtype=float).reshape(1, -1)
+            for step_index in range(int(steps)):
+                next_sem = int(forecast_semesters[step_index])
+                next_trend = current_trend + 1
+                lag1 = float(history_totals[-1])
+                same_sem = float(sem_last_map.get(next_sem, lag1))
+
+                x_input = make_temporal_feature_row(lag1, same_sem, next_sem, next_trend).reshape(1, -1)
                 pred = self.model.predict(x_input)[0]
                 pred = max(float(pred), 0)
                 predictions.append(pred)
-                history.append(pred)
+
+                history_totals.append(pred)
+                history_semesters.append(next_sem)
+                sem_last_map[next_sem] = pred
+                current_trend = next_trend
 
             return {
                 'predictions': np.array(predictions, dtype=float),
@@ -430,7 +733,7 @@ def load_enrollment_data():
             SELECT program_id, academic_year, semester, male, female,
                    (male + female) as total
             FROM enrollments
-            WHERE academic_year NOT LIKE '%-2027' AND semester != 3
+                WHERE academic_year NOT LIKE '%-2027'
             ORDER BY program_id, academic_year, semester
         """, conn)
     finally:
@@ -439,6 +742,8 @@ def load_enrollment_data():
     if df.empty:
         print("❌ No historical enrollment data found!")
         return None
+
+    df = normalize_enrollment_history(df)
 
     print(f"✅ Loaded {len(df)} records from {df['program_id'].nunique()} programs in {time.perf_counter() - started:.2f}s")
     return df
@@ -517,13 +822,17 @@ def get_model_quality_score(model_result):
     total_weight = 0.0
 
     metric_components = [
-        ('R²', 0.45, score_r2),
+        ('Raw_R2', 0.45, score_r2),
         ('MAPE', 0.35, score_mape),
         ('Theil_U', 0.20, score_theil_u)
     ]
 
     for metric_name, weight, scorer in metric_components:
-        score = scorer(metrics.get(metric_name))
+        metric_value = metrics.get(metric_name)
+        if metric_name == 'Raw_R2' and metric_value is None:
+            metric_value = metrics.get('R²')
+
+        score = scorer(metric_value)
         if score is None:
             continue
         weighted_scores.append(score * weight)
@@ -534,6 +843,55 @@ def get_model_quality_score(model_result):
 
     quality_score = sum(weighted_scores) / total_weight
     return clip_value(quality_score, CONFIDENCE_MIN, CONFIDENCE_MAX)
+
+
+def calculate_ensemble_weights(model_outputs):
+    scored_models = []
+
+    for model_key, model_result in model_outputs:
+        if not model_result or model_result.get('predictions') is None:
+            continue
+
+        quality = get_model_quality_score(model_result)
+        bonus = 1.0
+        metrics = model_result.get('metrics') or {}
+        raw_r2 = metrics.get('Raw_R2', metrics.get('R²'))
+
+        if model_key == 'xgboost':
+            bonus = 1.10
+            if raw_r2 is not None and is_valid_metric_value(raw_r2) and float(raw_r2) > 0:
+                bonus += 0.15
+        elif model_key == 'lstm':
+            bonus = 0.10
+
+        scored_models.append((model_key, max(float(quality) * bonus, 0.01)))
+
+    if not scored_models:
+        return [], []
+
+    raw_scores = np.array([score for _, score in scored_models], dtype=float)
+    model_keys = [key for key, _ in scored_models]
+
+    if len(raw_scores) == 1:
+        return model_keys, [1.0]
+
+    # Sharpen weight differences so the strongest model dominates when it is clearly better.
+    temperature = 0.60
+    stabilized = raw_scores / max(temperature, 1e-6)
+    stabilized = stabilized - np.max(stabilized)
+    exp_scores = np.exp(stabilized)
+    weights = exp_scores / np.sum(exp_scores)
+
+    xgb_index = model_keys.index('xgboost') if 'xgboost' in model_keys else None
+    if xgb_index is not None:
+        best_idx = int(np.argmax(raw_scores))
+        second_best = np.partition(raw_scores, -2)[-2] if len(raw_scores) > 1 else raw_scores[0]
+        if best_idx == xgb_index and (raw_scores[xgb_index] - second_best) >= 0.05:
+            weights = weights * 0.85
+            weights[xgb_index] += 0.15
+            weights = weights / np.sum(weights)
+
+    return model_keys, weights.tolist()
 
 
 def get_prediction_stability(pred_result):
@@ -585,6 +943,7 @@ def predict_for_program(program_id, program_data, future_years=1):
     print(f"📚 Program {program_id}: {PROGRAM_NAMES.get(program_id, 'Unknown')}")
     print(f"{'=' * 60}")
 
+    program_data = normalize_enrollment_history(program_data)
     program_data = program_data.sort_values(['academic_year', 'semester']).reset_index(drop=True)
 
     if len(program_data) < 5:
@@ -592,16 +951,23 @@ def predict_for_program(program_id, program_data, future_years=1):
         return None
 
     y = program_data['total'].values.astype(float)
+    semesters = program_data['semester'].values.astype(int)
 
-    split_idx = int(len(y) * 0.8)
-    y_train = y[:split_idx]
-    y_test = y[split_idx:]
+    train_y_all = y
+    train_semesters = semesters
+
+    split_idx = int(len(train_y_all) * 0.8)
+    y_train = train_y_all[:split_idx]
+    y_test = train_y_all[split_idx:]
+    sem_train = train_semesters[:split_idx]
+    sem_test = train_semesters[split_idx:]
 
     print("\n   📊 Data Summary:")
     print(f"      Total points: {len(y)} | Train: {len(y_train)} | Test: {len(y_test)}")
     print(f"      Min: {y.min():.0f} | Max: {y.max():.0f} | Mean: {y.mean():.0f}")
 
     steps = future_years * 3
+    forecast_semesters = build_forecast_semester_sequence(steps)
 
     print("\n   🔮 MODEL 1: Facebook Prophet")
     prophet_predictor = ProphetPredictor()
@@ -612,16 +978,18 @@ def predict_for_program(program_id, program_data, future_years=1):
 
     print("\n   🔮 MODEL 2: LSTM (Neural Network)")
     lstm_seq_len = min(4, max(2, len(y_train) // 5 if len(y_train) >= 5 else 2))
-    lstm_predictor = LSTMPredictor(sequence_length=lstm_seq_len, epochs=80, batch_size=4)
-    lstm_success = lstm_predictor.train(y_train, y_test)
-    lstm_pred = lstm_predictor.predict(y, steps=steps) if lstm_success else None
+    lstm_units = 16 if len(y_train) < 20 else 24
+    lstm_epochs = 60 if len(y_train) < 20 else 80
+    lstm_predictor = LSTMPredictor(sequence_length=lstm_seq_len, lstm_units=lstm_units, epochs=lstm_epochs, batch_size=4)
+    lstm_success = lstm_predictor.train(y_train, y_test, sem_train, sem_test)
+    lstm_pred = lstm_predictor.predict(y, semesters, steps=steps, forecast_semesters=forecast_semesters) if lstm_success else None
     if lstm_pred and lstm_pred.get('metrics'):
         ModelEvaluator.print_metrics(lstm_pred['metrics'], "LSTM")
 
     print("\n   🔮 MODEL 3: XGBoost")
     xgb_predictor = XGBoostPredictor(n_lags=min(3, max(1, len(y_train) - 1)))
-    xgb_success = xgb_predictor.train(y_train, y_test)
-    xgb_pred = xgb_predictor.predict(y, steps=steps) if xgb_success else None
+    xgb_success = xgb_predictor.train(y_train, y_test, sem_train, sem_test)
+    xgb_pred = xgb_predictor.predict(y, semesters, steps=steps, forecast_semesters=forecast_semesters) if xgb_success else None
     if xgb_pred and xgb_pred.get('metrics'):
         ModelEvaluator.print_metrics(xgb_pred['metrics'], "XGBoost")
 
@@ -631,18 +999,9 @@ def predict_for_program(program_id, program_data, future_years=1):
         ('xgboost', xgb_pred)
     ]
 
-    weighted_predictions = []
-    model_weights = []
-    valid_models = []
-
-    for model_key, model_result in model_outputs:
-        if not model_result or model_result.get('predictions') is None:
-            continue
-
-        weight = get_model_quality_score(model_result)
-        weighted_predictions.append(np.array(model_result['predictions'], dtype=float))
-        model_weights.append(weight)
-        valid_models.append(model_key)
+    valid_models, model_weights = calculate_ensemble_weights(model_outputs)
+    weighted_predictions = [np.array(model_outputs[[key for key, _ in model_outputs].index(model_key)][1]['predictions'], dtype=float)
+                            for model_key in valid_models]
 
     valid_predictions = weighted_predictions
 
@@ -661,6 +1020,53 @@ def predict_for_program(program_id, program_data, future_years=1):
     )
     print(f"   ⚖️ Ensemble weights: {weights_text}")
 
+    predictor_by_key = {
+        'prophet': prophet_predictor,
+        'lstm': lstm_predictor,
+        'xgboost': xgb_predictor
+    }
+
+    val_actual = None
+    val_prediction_rows = []
+    val_weights = []
+
+    for model_key, weight in zip(valid_models, model_weights):
+        predictor = predictor_by_key.get(model_key)
+        if predictor is None:
+            continue
+
+        actual = predictor.validation_actual
+        predicted = predictor.validation_predictions
+        if actual is None or predicted is None:
+            continue
+        if len(actual) == 0 or len(predicted) == 0:
+            continue
+
+        if val_actual is None:
+            val_actual = np.array(actual, dtype=float)
+
+        common_len = min(len(val_actual), len(actual), len(predicted))
+        if common_len < 1:
+            continue
+
+        val_actual = val_actual[-common_len:]
+        val_prediction_rows = [row[-common_len:] for row in val_prediction_rows]
+        val_prediction_rows.append(np.array(predicted, dtype=float)[-common_len:])
+        val_weights.append(float(weight))
+
+    ensemble_metrics = {}
+    if val_actual is not None and val_prediction_rows:
+        val_matrix = np.vstack(val_prediction_rows)
+        ensemble_val_pred = np.average(val_matrix, axis=0, weights=np.array(val_weights, dtype=float))
+        ensemble_metrics = ModelEvaluator.calculate_metrics(val_actual, ensemble_val_pred)
+
+    program_confidence = get_model_confidence({
+        'prophet': prophet_pred,
+        'lstm': lstm_pred,
+        'xgboost': xgb_pred
+    })
+    ensemble_metrics['Confidence'] = round(float(program_confidence), 4)
+
     return {
         'program_id': program_id,
         'program_name': PROGRAM_NAMES.get(program_id, f'Program {program_id}'),
@@ -671,13 +1077,7 @@ def predict_for_program(program_id, program_data, future_years=1):
             'predictions': np.maximum(ensemble_pred, 0),
             'lower_ci': None,
             'upper_ci': None,
-            'metrics': {
-                'R²': get_model_confidence({
-                    'prophet': prophet_pred,
-                    'lstm': lstm_pred,
-                    'xgboost': xgb_pred
-                })
-            }
+            'metrics': ensemble_metrics
         },
         'future_years': future_years
     }
@@ -823,14 +1223,11 @@ def insert_prediction_rows(cursor, pred_result, future_years, avg_male_ratio, pr
 
 
         predictions = model_result['predictions'][:future_years * 3]
+        forecast_semesters = build_forecast_semester_sequence(len(predictions))
 
         for sem_offset, pred_value in enumerate(predictions):
-            sem = (sem_offset % 3) + 1
+            sem = int(forecast_semesters[sem_offset])
             year_offset = sem_offset // 3
-
-            # Keep your existing rule: skip semester 3 (summer)
-            if sem == 3:
-                continue
 
             academic_year = f"{base_year + year_offset}-{base_year + year_offset + 1}"
 
@@ -967,6 +1364,7 @@ def save_model_metrics_to_db(all_predictions):
             prediction_year = f"{2026}-{2026 + pred_result['future_years'] - 1}"
 
             for model_name, model_key in [
+                ('Ensemble', 'ensemble'),
                 ('Prophet', 'prophet'),
                 ('LSTM', 'lstm'),
                 ('XGBoost', 'xgboost')

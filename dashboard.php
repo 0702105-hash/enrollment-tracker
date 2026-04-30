@@ -28,7 +28,7 @@
 
     <!-- Mobile menu button (small screens) -->
     <div class="dashboard-topbar">
-        <button id="mobileNavToggle" class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false">
+        <button ="mobileNavToggle" class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false">
             <span class="icon">☰</span>
             <span class="label">Menu</span>
         </button>
@@ -318,6 +318,7 @@
                             <thead>
                                 <tr>
                                     <th>Metric</th>
+                                    <th style="color:#f093fb;">Ensemble</th>
                                     <th style="color:#f093fb;">Prophet</th>
                                     <th style="color:#ed8936;">LSTM</th>
                                     <th style="color:#6D4C41;">XGBoost</th>
@@ -432,6 +433,14 @@ class EnrollmentTracker{
         this.userName = 'Admin';
 
         this.init();
+    }
+
+    normalizeModelName(modelName){
+        const normalized = String(modelName || '').trim();
+        if(!normalized || normalized.toLowerCase() === 'prophet+lstm+xgboost'){
+            return 'Ensemble';
+        }
+        return normalized;
     }
 
     init(){
@@ -1436,7 +1445,7 @@ class EnrollmentTracker{
         });
 
         // ── Prediction data ──
-        let preds = this.allPredictions.filter(p => p.model_name === modelFilter);
+        let preds = this.allPredictions.filter(p => this.normalizeModelName(p.model_name) === modelFilter);
         if(semFilter && ['1','2','3'].includes(semFilter)){
             preds = preds.filter(p => parseInt(p.semester) === parseInt(semFilter));
         } else if(semFilter === '12'){
@@ -1799,7 +1808,7 @@ class EnrollmentTracker{
 
         predictions.forEach(pred => {
             const key = `${pred.academic_year} S${pred.semester}`;
-            const modelName = pred.model_name || 'Ensemble';
+            const modelName = this.normalizeModelName(pred.model_name);
             if (!modelMap[modelName]) modelMap[modelName] = {};
             modelMap[modelName][key] = pred;
         });
@@ -2075,7 +2084,7 @@ class EnrollmentTracker{
         const semesterMap = {1:'First',2:'Second',3:'Summer'};
 
         grid.innerHTML = predictions.map(p => {
-            const modelName = p.model_name || 'Ensemble';
+            const modelName = this.normalizeModelName(p.model_name);
             const modelClass = String(modelName).toLowerCase();
 
             return `
@@ -2130,10 +2139,19 @@ class EnrollmentTracker{
                 return;
             }
 
+            const normalizeModelName = (name) => {
+                const normalized = String(name || '').trim();
+                if (!normalized || normalized.toLowerCase() === 'prophet+lstm+xgboost') {
+                    return 'Ensemble';
+                }
+                return normalized;
+            };
+
             const byModel = {};
             metrics.forEach(m => {
-                if (!byModel[m.model_name]) byModel[m.model_name] = {};
-                byModel[m.model_name][m.metric_name] = m.metric_value;
+                const modelName = normalizeModelName(m.model_name);
+                if (!byModel[modelName]) byModel[modelName] = {};
+                byModel[modelName][m.metric_name] = m.metric_value;
             });
 
             this.displayCommonMetrics(byModel);
@@ -2146,8 +2164,8 @@ class EnrollmentTracker{
     }
 
     displayCommonMetrics(byModel) {
-        const commonMetrics = ['MAE', 'RMSE', 'MAPE', 'R²', 'RMSLE', 'Theil_U'];
-        const models = ['Prophet', 'LSTM', 'XGBoost'];
+        const commonMetrics = ['MAE', 'RMSE', 'MAPE', 'R²', 'Raw_R2', 'Clipped_R2', 'Baseline_R2_Naive', 'RMSLE', 'Theil_U', 'Confidence'];
+        const models = ['Ensemble','Prophet', 'LSTM', 'XGBoost'];
         
         let html = '';
         commonMetrics.forEach(metric => {
@@ -2156,7 +2174,7 @@ class EnrollmentTracker{
             const numeric = values.map(v => isNaN(parseFloat(v)) ? null : parseFloat(v));
             let bestIdx = -1;
 
-            if (metric === 'R²') {
+            if (['R²', 'Raw_R2', 'Clipped_R2', 'Baseline_R2_Naive', 'Confidence'].includes(metric)) {
                 const filtered = numeric.map((v,i)=>({v,i})).filter(x => x.v !== null);
                 if (filtered.length) bestIdx = filtered.reduce((a,b)=>a.v>b.v?a:b).i;
             } else {
@@ -2169,6 +2187,9 @@ class EnrollmentTracker{
                 <td class="${bestIdx === 0 ? 'best-value' : ''}">${values[0]}</td>
                 <td class="${bestIdx === 1 ? 'best-value' : ''}">${values[1]}</td>
                 <td class="${bestIdx === 2 ? 'best-value' : ''}">${values[2]}</td>
+                <td class="${bestIdx === 3 ? 'best-value' : ''}">${values[3]}</td>
+                
+
                 <td>${bestIdx >= 0 ? models[bestIdx] : '—'}</td>
             </tr>`;
         });
@@ -2179,7 +2200,7 @@ class EnrollmentTracker{
     displayModelCards(byModel) {
         let html = '';
 
-        ['Prophet', 'LSTM', 'XGBoost'].forEach(modelName => {
+        ['Ensemble','Prophet', 'LSTM', 'XGBoost'].forEach(modelName => {
             const modelClass = modelName.toLowerCase();
             const metrics = byModel[modelName] || {};
             

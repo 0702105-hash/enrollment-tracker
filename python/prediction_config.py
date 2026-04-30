@@ -19,12 +19,17 @@ SARMAX_CONFIG = {
 
 # ============ PROPHET CONFIGURATION ============
 PROPHET_CONFIG = {
-    'yearly_seasonality': False,   # Annual patterns
+    'yearly_seasonality': False,   # Built-in annual pattern; custom seasonality is used instead
     'weekly_seasonality': False,   # Weekly patterns (usually False for academic data)
     'interval_width': 0.99,        # 99% confidence interval
     'changepoint_prior_scale': 0.05,  # Sensitivity to trend changes
     'seasonality_mode': 'additive', # or 'multiplicative'
-    'seasonality_prior_scale': 10.0
+    'seasonality_prior_scale': 10.0,
+    'use_custom_seasonality': True,
+    'custom_seasonality_name': 'academic_cycle',
+    'custom_seasonality_period': 365.25,
+    'custom_seasonality_fourier_order': 3,
+    'custom_seasonality_prior_scale': 10.0
 }
 
 # ============ LSTM CONFIGURATION ============

@@ -39,6 +39,12 @@ try {
     foreach ($metrics as &$metric) {
         $metric['program_id'] = (int) $metric['program_id'];
         $metric['metric_value'] = (float) $metric['metric_value'];
+        if (isset($metric['model_name'])) {
+            $modelName = trim((string) $metric['model_name']);
+            if ($modelName === '' || strcasecmp($modelName, 'Prophet+LSTM+XGBoost') === 0) {
+                $metric['model_name'] = 'Ensemble';
+            }
+        }
     }
 
     header('Content-Type: application/json');
